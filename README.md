@@ -4,7 +4,7 @@
 
 - 开发周期：2026-08-29 至 2026-09-03（9/4 路演）
 - 技术栈：前端 HTML/CSS/JavaScript/Ajax/jQuery/Layui；后端 Python/FastAPI/SQLAlchemy/MySQL；Linux + 宝塔部署
-- 仓库归属：mac/ai-portal（私有）
+- 仓库归属：mac/Uni-AI_Model（私有）
 
 ## 目录规划（建议）
 
@@ -21,3 +21,4 @@ ai-portal/
 
 - [docs/数据字典.md](docs/数据字典.md)：users / user_profiles / wallets 字段、约束、关系与建表 SQL
 - [docs/接口约定表.md](docs/接口约定表.md)：统一返回结构、错误码、权限矩阵及成员1 的 7 个接口
+- [docs/项目框架与任务分工.md](docs/项目框架与任务分工.md)：总体架构、目录框架、四人任务落实
