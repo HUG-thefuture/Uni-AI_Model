@@ -36,6 +36,23 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     log_level: str = "INFO"
 
+    # --- 鉴权 ---
+    jwt_expire_hours: int = 24
+
+    # --- SSE 流式 ---
+    sse_first_byte_timeout: int = 15   # 上游首字节超时(秒)
+    sse_total_timeout: int = 120       # 单次流式总时长上限(秒)
+
+    # --- 上传与素材 ---
+    upload_dir: str = "uploads"
+
+    # --- 开放平台 ---
+    openapi_rate_limit_per_min: int = 30   # 单 Key 每分钟调用上限
+
+    # --- 长耗时任务 ---
+    video_poll_interval_sec: int = 5
+    video_poll_max_sec: int = 300
+
     @field_validator("database_url", "secret_key")
     @classmethod
     def _not_blank(cls, v: str, info) -> str:

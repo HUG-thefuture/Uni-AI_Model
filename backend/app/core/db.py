@@ -41,7 +41,9 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    """建表(成员2 负责的三张表;成员1/4 的表由其建表 SQL 管理)。"""
-    from app.models import ai_call_log, ai_task, model  # noqa: F401 注册映射
+    """建表:成员2 全部表 + 支撑表桩(users/wallets 等成员1/4 表以 sql/ 下 DDL 为准)。"""
+    from app.models import (  # noqa: F401 注册映射
+        ai_call_log, ai_task, model, support,
+    )
 
     Base.metadata.create_all(bind=engine)
