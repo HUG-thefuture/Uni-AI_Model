@@ -5,6 +5,20 @@
 
 USE ai_portal;
 
+CREATE TABLE IF NOT EXISTS users (
+  id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户主键',
+  username         VARCHAR(50)     NOT NULL COMMENT '用户名',
+  password_hash    VARCHAR(255)    NOT NULL COMMENT '密码哈希',
+  role             VARCHAR(20)     NOT NULL DEFAULT 'user' COMMENT 'user / admin',
+  status           TINYINT         NOT NULL DEFAULT 1 COMMENT '1 启用 0 禁用',
+  real_auth_status TINYINT         NOT NULL DEFAULT 0 COMMENT '0 未认证 1 已认证 2 审核中',
+  school           VARCHAR(100)    DEFAULT NULL COMMENT '学校',
+  created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_username (username),
+  KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户主表';
+
 CREATE TABLE IF NOT EXISTS wallets (
   user_id         BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',
   balance         BIGINT          NOT NULL DEFAULT 0 COMMENT '可用余额(分)',
