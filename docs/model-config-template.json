@@ -1,0 +1,47 @@
+{
+  "_说明": "模型初始化配置模板(WP01 交付,8/29 晚由成员4 执行 INSERT 或后台导入)。config_json 只存非敏感参数,密钥一律走环境变量 SILICONFLOW_API_KEY / OLLAMA_BASE_URL。status: enabled/disabled。",
+  "models": [
+    {
+      "name": "Qwen2.5-7B 对话(线上)",
+      "model_code": "Qwen/Qwen2.5-7B-Instruct",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "硅基流动托管的中英文对话模型,用于文本对话主链路",
+      "capability_tags": ["对话", "推理"]
+    },
+    {
+      "name": "Stable Diffusion 文生图(线上)",
+      "model_code": "stabilityai/stable-diffusion-3-5-large",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 10,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"image_size\": \"1024x1024\", \"num_inference_steps\": 28}",
+      "description": "硅基流动文生图模型,用于图像生成任务",
+      "capability_tags": ["图像生成"]
+    },
+    {
+      "name": "Qwen2.5 3B(本地 Ollama)",
+      "model_code": "qwen2.5:3b",
+      "provider_type": "local",
+      "model_type": "text",
+      "vendor": "ollama",
+      "endpoint": "http://localhost:11434",
+      "price_per_call": 0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"num_ctx\": 4096}",
+      "description": "Ollama 本地部署的小参数对话模型,免费演示与断网兜底",
+      "capability_tags": ["对话", "本地"]
+    }
+  ]
+}
