@@ -16,6 +16,13 @@ backend/
 
 统一规范：接口前缀 `/api`；返回 `{code, message, data, request_id}`；管理接口 `require_admin`。
 
+## 统一环境约定（全组执行）
+
+- Python 版本：**3.11.9**（仓库根目录已放 `.python-version`，pyenv/uv 会自动识别）
+- 每个成员本地必须用虚拟环境：`python -m venv .venv`，依赖全部装在虚拟环境里
+- 安装依赖：`pip install -r requirements.txt`
+- 联调前如出现"本地能跑、别人报错"，先对比 `python --version` 是否为 3.11.9
+
 ## 成员2 WP01 交付（8/29）：数据模型与适配层骨架
 
 - **ORM**（`app/models/`）：`models` / `ai_tasks` / `ai_call_logs` 三表；`user_id` 均按 `users.id` 逻辑外键关联（不建物理外键，应用层校验归属），与 `docs/数据字典.md` 口径一致。

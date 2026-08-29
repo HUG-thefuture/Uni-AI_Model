@@ -1,4 +1,4 @@
-# 后端依赖(Python 3.10+,实际以 3.10-3.14 兼容版本安装)
+# 后端依赖（全组统一 Python 3.11.9，见仓库根目录 .python-version）
 fastapi>=0.110
 uvicorn[standard]>=0.27
 SQLAlchemy>=2.0
