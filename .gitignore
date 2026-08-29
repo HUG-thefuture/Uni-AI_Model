@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 环境变量与密钥（禁止提交）
+.env
+*.env.local
+config_local.*
+
+# 数据库与备份
+*.sql.bak
+*.dump
+backups/
+uploads/
+
+# 编辑器/系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
