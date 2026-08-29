@@ -38,14 +38,15 @@ def create_app() -> FastAPI:
     os.makedirs(settings.upload_dir, exist_ok=True)
     app.mount("/static", StaticFiles(directory=settings.upload_dir), name="static")
 
-    # 业务路由(WP03 模型管理 / WP04+05 会话与任务 / WP06 开放平台)
-    from app.routers import admin_models, chat, models, open_api, tasks
+    # 业务路由(WP03 模型管理 / WP04+05 会话与任务 / WP06 开放平台 / WP07 上传)
+    from app.routers import admin_models, chat, models, open_api, tasks, uploads
     for prefix in (settings.api_prefix, "/api/v1"):
         app.include_router(models.router, prefix=prefix)
         app.include_router(admin_models.router, prefix=prefix)
         app.include_router(chat.router, prefix=prefix)
         app.include_router(tasks.router, prefix=prefix)
         app.include_router(open_api.router, prefix=prefix)
+        app.include_router(uploads.router, prefix=prefix)
 
     return app
 

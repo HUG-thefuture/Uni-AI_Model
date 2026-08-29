@@ -1,4 +1,4 @@
-"""任务路由(WP04+WP05):SSE 流式文本对话 + 图像四态异步任务 + 任务中心。
+"""任务路由(WP04+WP05+WP07):SSE 流式文本对话 + 图像/声音/视频四态异步任务 + 任务中心。
 
 路径不含 /api 前缀,main.py 统一挂 /api 与 /api/v1。
 SSE 响应头:Cache-Control: no-cache、X-Accel-Buffering: no(禁 Nginx 缓冲)。
@@ -16,8 +16,14 @@ from app.core.response import APIError, ok
 from app.models.ai_task import AiTask
 from app.models.model import Model
 from app.models.support import User
-from app.schemas.task import ImageTaskCreate, TextTaskCreate
-from app.services import billing, chat_service, task_service
+from app.schemas.task import (
+    AudioAsrTaskCreate,
+    AudioCloneTaskCreate,
+    ImageTaskCreate,
+    TextTaskCreate,
+    VideoTaskCreate,
+)
+from app.services import av_service, billing, chat_service, task_service
 
 router = APIRouter(tags=["tasks"])
 
@@ -90,6 +96,51 @@ async def create_image_task(body: ImageTaskCreate,
     db.commit()
     db.refresh(task)
     task_service.start_background_task(task.id)
+    return ok({"task_id": task.id, "status": task.status})
+
+
+# ---------- 声音/视频:异步四态任务(WP07,复用统一执行器) ----------
+
+@router.post("/tasks/audio/clone")
+async def create_audio_clone_task(body: AudioCloneTaskCreate,
+                                  user: User = Depends(get_current_user),
+                                  db: Session = Depends(get_db)):
+    """声音克隆:校验模型(audio/enabled)与时长上限 → 冻结 → pending 任务,
+    立即返回 {task_id, status:"pending"};同 request_id 重复提交 409。"""
+    model = av_service.get_audio_model(db, body.model_id)
+    params = {
+        "voice_name": body.voice_name,
+        "text": body.text,
+        "sample_audio_url": body.sample_audio_url,
+        "duration_sec": body.duration_sec,
+    }
+    params = {k: v for k, v in params.items() if v is not None}
+    task = av_service.submit_av_task(db, user, model, "audio_clone", body.text, params)
+    return ok({"task_id": task.id, "status": task.status})
+
+
+@router.post("/tasks/audio/asr")
+async def create_audio_asr_task(body: AudioAsrTaskCreate,
+                                user: User = Depends(get_current_user),
+                                db: Session = Depends(get_db)):
+    """语音识别:校验同声音克隆;params_json 存 audio_url 供执行器下载转写。"""
+    model = av_service.get_audio_model(db, body.model_id)
+    params = {"audio_url": body.audio_url}
+    if body.duration_sec is not None:
+        params["duration_sec"] = body.duration_sec
+    task = av_service.submit_av_task(db, user, model, "asr", body.audio_url, params)
+    return ok({"task_id": task.id, "status": task.status})
+
+
+@router.post("/tasks/video")
+async def create_video_task(body: VideoTaskCreate,
+                            user: User = Depends(get_current_user),
+                            db: Session = Depends(get_db)):
+    """长文本转视频:文本 ≤2000 字(超长 400)→ 冻结 → pending 任务,
+    后台提交上游并轮询(上游未定,线上模型超时判 failed 不扣费,Mock 可演示全链路)。"""
+    model = av_service.get_video_model(db, body.model_id)
+    params = body.params.model_dump(exclude_none=True) if body.params else {}
+    task = av_service.submit_av_task(db, user, model, "video", body.text, params)
     return ok({"task_id": task.id, "status": task.status})
 
 

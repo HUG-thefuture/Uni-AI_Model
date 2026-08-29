@@ -1,7 +1,7 @@
-"""异步任务统一执行器(WP05):四态 pending → processing → succeeded / failed。
+"""异步任务统一执行器(WP05+WP07):四态 pending → processing → succeeded / failed。
 
 - run_async_task(task_id):从 ai_tasks 读参数执行,按 task_type / model.model_type
-  分派到 Provider 对应 generate_* 方法,供 image 及后续 audio_clone/asr/video(WP07)复用;
+  分派到 Provider 对应 generate_* 方法(text/image/audio_clone/asr/video 统一走此链路);
 - 任何异常都在执行器内消化:失败 → billing.refund + error_message(中文)、cost 归 0,
   绝不抛到 asyncio 顶层(红线:失败绝不扣费);
 - 超时兜底:外层 asyncio.wait_for(图像 120s,与 read_timeouts["image"] 一致),超时按失败处理;
@@ -61,6 +61,27 @@ def _fail_task(db, task: AiTask | None, message: str, start: float) -> None:
         logger.exception("任务 %s 失败收尾异常", task.id)
 
 
+async def _poll_video_result(provider, model, handle: dict) -> str:
+    """视频句柄轮询:上游查询接口本期未定(TODO 登记 docs/api.md)。
+
+    - provider 若实现 query_video(model, handle)(Mock 已实现)则按间隔调用,
+      返回 {"status": "completed", "video_url": ...} 即成功;
+    - 无查询能力(线上模型)时仅按配置间隔空轮询,超过 video_poll_max_sec
+      判超时失败「视频生成超时,本次不扣费」。
+    """
+    s = get_settings()
+    interval = max(0.05, s.video_poll_interval_sec)
+    deadline = time.monotonic() + max(s.video_poll_max_sec, interval)
+    query = getattr(provider, "query_video", None)
+    while time.monotonic() < deadline:
+        await asyncio.sleep(interval)
+        if callable(query):
+            poll = await query(model, handle)
+            if poll.get("status") == "completed" and poll.get("video_url"):
+                return poll["video_url"]
+    raise ProviderError("provider_timeout", "视频生成超时,本次不扣费")
+
+
 async def run_async_task(task_id: int) -> None:
     """统一执行器:任何异常都在本函数内消化,绝不向 asyncio 顶层抛出。"""
     db = SessionLocal()
@@ -107,8 +128,36 @@ async def run_async_task(task_id: int) -> None:
                 timeout=get_settings().read_timeouts.get("text", 60),
             )
             task.result_text = result.get("content", "")
+        elif task_type == "audio_clone":
+            # 声音克隆:params_json 提供 voice_name/text,成功取 audio_url 落 result_url
+            result = await asyncio.wait_for(
+                provider.generate_audio_clone(model, params),
+                timeout=get_settings().read_timeouts.get("audio", 300),
+            )
+            audio_url = result.get("audio_url")
+            if not audio_url:
+                raise ProviderError("provider_bad_response", "声音服务未返回音频地址")
+            task.result_url = audio_url
+        elif task_type == "asr":
+            # 语音识别:params_json.audio_url(可来自 /uploads),成功取 text 落 result_text
+            audio_url = params.get("audio_url") or task.prompt or ""
+            result = await asyncio.wait_for(
+                provider.generate_asr(model, audio_url, params),
+                timeout=get_settings().read_timeouts.get("audio", 300),
+            )
+            task.result_text = result.get("text", "")
+        elif task_type == "video":
+            # 长文本转视频:先拿任务句柄;completed 直接取 video_url,
+            # processing 则按 video_poll_interval_sec 轮询至 video_poll_max_sec(超时判 failed 不扣费)
+            handle = await asyncio.wait_for(
+                provider.generate_video(model, task.prompt or "", params),
+                timeout=get_settings().read_timeouts.get("video", 300),
+            )
+            if handle.get("status") == "completed" and handle.get("video_url"):
+                task.result_url = handle["video_url"]
+            else:
+                task.result_url = await _poll_video_result(provider, model, handle)
         else:
-            # audio_clone / asr / video:WP07 接入,当前一律按未实现失败并退费
             raise ProviderError("not_implemented", "该任务类型暂未开放,请等待后续版本")
 
         billing.settle(db, task.user_id, task.cost, task_id=task.id, model_id=model.id)

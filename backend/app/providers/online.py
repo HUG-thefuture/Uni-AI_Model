@@ -4,6 +4,7 @@
 - 本工作包(WP01)实现 generate_text 的流式与非流式通路(POST /v1/chat/completions,
   stream=true 时解析 SSE 增量),图像/声音/视频方法留待 WP04/WP07 实现。
 """
+import asyncio
 import json
 import logging
 import time
@@ -175,11 +176,156 @@ class OnlineProvider(BaseProvider):
             )
         return {"image_urls": urls, "raw": data}
 
+    # ---------- 声音 / 视频(WP07) ----------
+
+    async def _download_audio(self, audio_url: str) -> tuple[bytes, str]:
+        """按 URL 取音频字节:本地 /static/ 路径读 upload_dir,http(s) 直接下载。
+
+        返回 (字节, 文件名);下载失败/文件缺失统一转 ProviderError。
+        """
+        from pathlib import Path
+
+        if audio_url.startswith("/static/"):
+            filename = Path(audio_url).name  # 只取文件名,防目录穿越
+            path = Path(get_settings().upload_dir) / filename
+            if not path.is_file():
+                raise ProviderError("invalid_audio", "音频文件不存在,请重新上传", audio_url)
+            return path.read_bytes(), filename
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout("audio")) as client:
+                resp = await client.get(audio_url)
+                resp.raise_for_status()
+                name = audio_url.rsplit("/", 1)[-1] or "audio.mp3"
+                return resp.content, name
+        except httpx.HTTPError as exc:
+            raise ProviderError("audio_download_failed", "音频下载失败,请检查音频地址", str(exc)) from exc
+
+    async def _post_multipart_with_retry(
+        self, url: str, *, headers: dict, files: dict, data: dict | None, model_type: str
+    ) -> httpx.Response:
+        """multipart POST(语音识别上传用):重试策略与 _post_with_retry 一致。"""
+        s = get_settings()
+        retries = max(0, s.provider_max_retries)
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout(model_type)) as client:
+                    resp = await client.post(url, headers=headers, files=files, data=data)
+                if resp.status_code >= 400:
+                    raise self._map_http_error(resp.status_code, resp.text)  # 鉴权/参数类不重试
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    raise httpx.HTTPStatusError(
+                        f"上游 {resp.status_code}", request=resp.request, response=resp
+                    )
+                return resp
+            except ProviderError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt < retries:
+                    delay = 2 ** attempt
+                    logger.warning("上传调用失败(第 %s 次),%.0fs 后重试: %s", attempt + 1, delay, exc)
+                    await asyncio.sleep(delay)
+        raise self._translate(last_exc or Exception("unknown"))
+
     async def generate_audio_clone(self, model, params: dict | None = None) -> dict:
-        raise NotImplementedError("声音克隆在 WP07 实现")
+        """声音克隆:POST /v1/audio/speech,响应音频二进制落盘 upload_dir。
+
+        params 需含 text(合成文本)与可选 voice_name(默认 alloy);
+        返回 {"audio_url": "/static/clone-<request_id>.mp3", "raw": {...}}。
+        """
+        import uuid as _uuid
+        from pathlib import Path
+
+        from app.core.request_id import current_request_id
+
+        key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
+        params = params or {}
+        text = (params.get("text") or "").strip()
+        if not text:
+            raise ProviderError("invalid_params", "声音克隆缺少合成文本")
+        body = {
+            "model": model.model_code,
+            "input": text,
+            "voice": params.get("voice_name", "alloy"),
+            "response_format": "mp3",
+        }
+
+        def validate(resp: httpx.Response) -> None:
+            if resp.status_code >= 400:
+                raise self._map_http_error(resp.status_code, resp.text)
+
+        resp = await self._post_with_retry(
+            f"{BASE_URL}/v1/audio/speech",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json_body=body,
+            model_type="audio",
+            validate=validate,
+        )
+        if not resp.content:
+            raise ProviderError("provider_bad_response", "声音服务未返回音频内容", resp.text[:200])
+        filename = f"clone-{current_request_id()}.mp3"
+        upload_dir = Path(get_settings().upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            (upload_dir / filename).write_bytes(resp.content)
+        except OSError as exc:
+            raise ProviderError("provider_bad_response", "音频保存失败,请稍后重试", str(exc)) from exc
+        return {"audio_url": f"/static/{filename}", "raw": {"mock_saved": True, "size": len(resp.content)}}
 
     async def generate_asr(self, model, audio_url: str, params: dict | None = None) -> dict:
-        raise NotImplementedError("语音识别在 WP07 实现")
+        """语音识别:先按 audio_url 取音频字节,再 multipart 上传 /v1/audio/transcriptions。
+
+        返回 {"text": 转写文本, "raw": {...}};鉴权失败等 4xx 走 _map_http_error。
+        """
+        key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
+        audio_bytes, filename = await self._download_audio(audio_url)
+        files = {"file": (filename or "audio.mp3", audio_bytes)}
+        data = {"model": model.model_code}
+        resp = await self._post_multipart_with_retry(
+            f"{BASE_URL}/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {key}"},
+            files=files,
+            data=data,
+            model_type="audio",
+        )
+        result = resp.json()
+        text = result.get("text")
+        if text is None:
+            raise ProviderError("provider_bad_response", "语音识别服务返回格式异常", resp.text[:500])
+        return {"text": str(text), "raw": result}
 
     async def generate_video(self, model, prompt: str, params: dict | None = None) -> dict:
-        raise NotImplementedError("视频任务在 WP07 实现")
+        """长文本转视频:POST /v1/video/submit 提交任务句柄,状态轮询由 task_service 负责。
+
+        TODO:上游视频接口路径/报文本期未定,若 404/未实现则抛 provider_not_ready,
+        线上模型视频任务将 failed 不扣费,由 Mock 模型兜底演示全链路。
+        """
+        key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
+        body = {"model": model.model_code, "prompt": prompt}
+        if params:
+            body.update(params)  # resolution / duration 等透传
+        try:
+            resp = await self._post_with_retry(
+                f"{BASE_URL}/v1/video/submit",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json_body=body,
+                model_type="video",
+                validate=lambda r: (
+                    self._map_http_error(r.status_code, r.text)
+                    if r.status_code >= 400
+                    else None
+                ),
+            )
+            data = resp.json()
+        except (httpx.HTTPError, ProviderError) as exc:
+            # 上游未实现/404/网络不可达:统一按「接口未就绪」处理,任务失败不扣费
+            raise ProviderError(
+                "provider_not_ready", "上游视频接口暂不可用,请使用 Mock 模型演示", str(exc)
+            ) from exc
+        upstream_id = data.get("task_id") or data.get("id") or data.get("request_id")
+        if not upstream_id:
+            raise ProviderError(
+                "provider_bad_response", "视频服务未返回任务句柄", resp.text[:500]
+            )
+        return {"task_id": str(upstream_id), "status": "processing", "raw": data}

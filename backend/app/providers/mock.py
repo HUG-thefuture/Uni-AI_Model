@@ -20,6 +20,9 @@ MOCK_IMAGE_URL = "https://dummyimage.com/1024x1024/4f7cff/ffffff.png&text=Mock+I
 MOCK_AUDIO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3"
 MOCK_VIDEO_URL = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
 
+# 最小可用 MP3 字节(ID3v2 头 + 一帧 MPEG 同步字):供 Mock 克隆音频落盘 /static 使用
+MOCK_MP3_BYTES = b"ID3\x03\x00\x00\x00\x00\x00\x00" + b"\xff\xfb\x90\x64" + b"\x00" * 128
+
 
 class MockProvider(BaseProvider):
     vendor = "mock"
@@ -77,8 +80,22 @@ class MockProvider(BaseProvider):
         }
 
     async def generate_audio_clone(self, model, params: dict | None = None) -> dict:
-        await self._simulate_latency()
-        return {"audio_url": MOCK_AUDIO_URL, "raw": {"mock": True}}
+        """与 OnlineProvider 契约一致:合成音频落盘 upload_dir,返回 /static/ URL;
+        落盘失败(只读盘等)时退回公网样例 URL。"""
+        await self._simulate_latency(3.0, 8.0)
+        try:
+            import uuid as _uuid
+            from pathlib import Path
+
+            from app.core.config import get_settings
+
+            upload_dir = Path(get_settings().upload_dir)
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"clone-mock-{_uuid.uuid4().hex[:12]}.mp3"
+            (upload_dir / filename).write_bytes(MOCK_MP3_BYTES)
+            return {"audio_url": f"/static/{filename}", "raw": {"mock": True}}
+        except OSError:
+            return {"audio_url": MOCK_AUDIO_URL, "raw": {"mock": True}}
 
     async def generate_asr(self, model, audio_url: str, params: dict | None = None) -> dict:
         await self._simulate_latency()
@@ -91,6 +108,17 @@ class MockProvider(BaseProvider):
         """长耗时任务:立即返回句柄,由上层任务服务轮询状态(模拟 4 态流转)。"""
         task_id = f"mock-video-{random.randint(100000, 999999)}"
         return {"task_id": task_id, "status": "processing", "raw": {"mock": True, "prompt": prompt}}
+
+    async def query_video(self, model, handle: dict) -> dict:
+        """视频句柄完成机制:sleep 3-5s 后返回 completed 语义,供 task_service 轮询。
+        (generate_video 保持句柄语义以兼容既有验收;线上模型无本方法 → 轮询超时判 failed。)"""
+        await self._simulate_latency(3.0, 5.0)
+        return {
+            "task_id": handle.get("task_id"),
+            "status": "completed",
+            "video_url": MOCK_VIDEO_URL,
+            "raw": {"mock": True, "polled": True},
+        }
 
     async def health_check(self, model) -> dict:
         await asyncio.sleep(0.05)
