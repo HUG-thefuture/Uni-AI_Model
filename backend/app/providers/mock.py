@@ -57,8 +57,24 @@ class MockProvider(BaseProvider):
         }
 
     async def generate_image(self, model, prompt: str, params: dict | None = None) -> dict:
+        """返回 2-4 张样例图(数量取 params["num"],默认 2,钳制 1..4)。
+
+        与 OnlineProvider 统一返回 {"image_urls": [str], "raw": {...}};
+        另保留 image_url(首图)键以兼容旧调用方。
+        """
         await self._simulate_latency()
-        return {"image_url": MOCK_IMAGE_URL, "raw": {"mock": True, "prompt": prompt}}
+        params = params or {}
+        try:
+            num = int(params.get("num") or 2)
+        except (TypeError, ValueError):
+            num = 2
+        num = max(1, min(4, num))
+        urls = [MOCK_IMAGE_URL for _ in range(num)]
+        return {
+            "image_urls": urls,
+            "image_url": urls[0],
+            "raw": {"mock": True, "prompt": prompt, "num": num},
+        }
 
     async def generate_audio_clone(self, model, params: dict | None = None) -> dict:
         await self._simulate_latency()

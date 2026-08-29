@@ -112,10 +112,68 @@ class OnlineProvider(BaseProvider):
         except ProviderError:
             return {"ok": False, "latency_ms": int((time.monotonic() - start) * 1000)}
 
-    # ---------- 图像 / 声音 / 视频(WP04 / WP07 实现) ----------
+    # ---------- 图像(WP04)/ 声音 / 视频(WP07 实现) ----------
 
     async def generate_image(self, model, prompt: str, params: dict | None = None) -> dict:
-        raise NotImplementedError("图像通路在 WP04 实现 siliconflow /v1/images/generations")
+        """文生图:POST /v1/images/generations(读取超时取 self._timeout("image") = 120s)。
+
+        params 支持 image_size(默认 1024x1024)、num(1..4,默认 1,映射 batch_size)。
+        返回与 MockProvider 统一的结构 {"image_urls": [str], "raw": {...}}:
+        - 上游返回 {"images":[{"url":...}]} 时直接透传 URL;
+        - 返回 {"images":[{"b64_json":...}]} 时解码保存到 settings.upload_dir,
+          返回本地 /static/<文件名> URL。
+        """
+        import base64
+        import uuid as _uuid
+        from pathlib import Path
+
+        key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
+        params = params or {}
+        image_size = params.get("image_size") or "1024x1024"
+        try:
+            batch_size = int(params.get("num") or 1)
+        except (TypeError, ValueError):
+            batch_size = 1
+        batch_size = max(1, min(4, batch_size))
+        body = {
+            "model": model.model_code,
+            "prompt": prompt,
+            "image_size": image_size,
+            "batch_size": batch_size,
+        }
+
+        def validate(resp: httpx.Response) -> None:
+            if resp.status_code >= 400:
+                raise self._map_http_error(resp.status_code, resp.text)
+
+        resp = await self._post_with_retry(
+            f"{BASE_URL}/v1/images/generations",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json_body=body,
+            model_type="image",
+            validate=validate,
+        )
+        data = resp.json()
+        upload_dir = Path(get_settings().upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        urls: list[str] = []
+        for item in data.get("images") or []:
+            if item.get("url"):
+                urls.append(str(item["url"]))
+            elif item.get("b64_json"):
+                filename = f"img_{_uuid.uuid4().hex}.png"
+                try:
+                    (upload_dir / filename).write_bytes(base64.b64decode(item["b64_json"]))
+                except (ValueError, OSError) as exc:
+                    raise ProviderError(
+                        "provider_bad_response", "图像保存失败,请稍后重试", str(exc)
+                    ) from exc
+                urls.append(f"/static/{filename}")
+        if not urls:
+            raise ProviderError(
+                "provider_bad_response", "模型服务返回格式异常,未包含图像", resp.text[:500]
+            )
+        return {"image_urls": urls, "raw": data}
 
     async def generate_audio_clone(self, model, params: dict | None = None) -> dict:
         raise NotImplementedError("声音克隆在 WP07 实现")
