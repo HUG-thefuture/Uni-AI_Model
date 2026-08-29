@@ -36,7 +36,7 @@ def main() -> int:
                 "messages": [{"role": "user", "content": "用一句话介绍四川高校AI大模型门户项目"}],
                 "max_tokens": 100,
             },
-            timeout=httpx.Timeout(connect=10, read=60),
+            timeout=httpx.Timeout(connect=10, read=60, write=60, pool=60),
         )
     except httpx.HTTPError as exc:
         print(f"网络失败: {exc!r}")
