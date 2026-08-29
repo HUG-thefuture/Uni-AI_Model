@@ -5,7 +5,9 @@
 - 本路由直接返回 OpenAI 兼容结构(不包统一响应壳),仅鉴权/限流等失败走 APIError 统一结构;
 - 扣费铁律:预扣冻结 → 调用 → 成功结算 → 失败释放,失败一律不扣费;
 - 每次调用写 ai_call_logs(Provider 层)与 api_usage_logs(Key 维度统计);
-- SSE 生成器内不使用请求级 db(可能已关闭),自建 app.core.db.SessionLocal()。
+- SSE 生成器内不使用请求级 db(可能已关闭),自建 app.core.db.SessionLocal();
+- 异步上下文中的落库经 app.core.db.run_db 放线程池执行,断连收尾(CancelledError/
+  GeneratorExit 分支)保持同步直调,避免二次取消丢失收尾。
 """
 import asyncio
 import json
@@ -20,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.api_key_auth import require_api_key
 from app.core.config import get_settings
-from app.core.db import SessionLocal, get_db
+from app.core.db import SessionLocal, get_db, run_db
 from app.core.request_id import current_request_id
 from app.core.response import APIError
 from app.models.ai_call_log import AiCallLog
@@ -114,6 +116,61 @@ def _mark_task_failed(db: Session, task: AiTask | None, user_id: int, cost: int,
     db.commit()
 
 
+def _get_text_model_by_code(db: Session, model_code: str) -> Model:
+    """按 model_code 取文本模型:404 / 维护中 409。"""
+    model = db.query(Model).filter(Model.model_code == model_code).one_or_none()
+    if model is None or model.model_type != "text":
+        raise APIError(404, "模型不存在")
+    if model.status != "enabled":
+        raise APIError(409, "模型维护中,暂不可调用")
+    return model
+
+
+def _create_openai_task(db: Session, *, request_id: str, user_id: int, model: Model,
+                        prompt: str, params: dict, cost: int) -> AiTask:
+    """建任务 + 预扣冻结(freeze 失败抛 409 时任务未提交,自动丢弃)。"""
+    task = AiTask(
+        request_id=request_id, user_id=user_id, model_id=model.id, task_type="text",
+        prompt=prompt, params_json=json.dumps(params, ensure_ascii=False) if params else None,
+        status="processing", cost_status="frozen", cost=cost,
+    )
+    db.add(task)
+    db.flush()
+    billing.freeze(db, user_id, cost, task_id=task.id)
+    db.commit()
+    return task
+
+
+def _finish_success(db: Session, *, task: AiTask, key_id: int, api_key_id: int | None,
+                    path: str, model: Model, vendor: str, request_id: str,
+                    start: float, content: str, cost: int) -> None:
+    """成功结算:任务 succeeded + settle + ai_call_logs/api_usage_logs 落库。"""
+    latency_ms = int((time.monotonic() - start) * 1000)
+    task.status = "succeeded"
+    task.result_text = content
+    task.cost_status = "settled"
+    task.latency_ms = latency_ms
+    db.commit()
+    billing.settle(db, key_id, cost, task_id=task.id, model_id=model.id)
+    db.commit()
+    _write_call_log(db, request_id=request_id, user_id=key_id, model_id=model.id,
+                    vendor=vendor, start=start, success=True, error_code=None)
+    _write_usage_log(db, key_id=api_key_id, user_id=key_id, path=path,
+                     model_id=model.id, status_code=200, latency_ms=latency_ms)
+
+
+def _finish_failure(db: Session, *, task_id: int, key_id: int, api_key_id: int | None,
+                    path: str, model_id: int | None, vendor: str, request_id: str,
+                    start: float, cost: int, message: str, error_code: str) -> None:
+    """失败收尾:释放冻结、任务 failed + 日志落库(不扣费)。"""
+    latency_ms = int((time.monotonic() - start) * 1000)
+    _mark_task_failed(db, db.get(AiTask, task_id), key_id, cost, message)
+    _write_call_log(db, request_id=request_id, user_id=key_id, model_id=model_id,
+                    vendor=vendor, start=start, success=False, error_code=str(error_code))
+    _write_usage_log(db, key_id=api_key_id, user_id=key_id, path=path, model_id=model_id,
+                     status_code=502, latency_ms=latency_ms)
+
+
 async def _generate_once(provider, model, messages: list[dict], params: dict) -> dict:
     """非流式调用:优先 generate_text_once;Mock 等未实现时聚合流式结果。
 
@@ -148,14 +205,8 @@ async def chat_completions(
     if not await rate_limiter.check(request.state.api_key_id):
         raise APIError(429, "请求过于频繁,请稍后重试")
 
-    # 模型校验:按 model_code
-    model = (
-        db.query(Model).filter(Model.model_code == body.model).one_or_none()
-    )
-    if model is None or model.model_type != "text":
-        raise APIError(404, "模型不存在")
-    if model.status != "enabled":
-        raise APIError(409, "模型维护中,暂不可调用")
+    # 模型校验:按 model_code(DB 操作经 run_db 放线程池,不阻塞事件循环)
+    model = await run_db(_get_text_model_by_code, db, body.model)
 
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
     prompt = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
@@ -165,16 +216,10 @@ async def chat_completions(
     chatcmpl_id = f"chatcmpl-{request_id}"
     start = time.monotonic()
 
-    # 建任务 + 预扣冻结(freeze 失败抛 409 时任务未提交,自动丢弃)
-    task = AiTask(
-        request_id=request_id, user_id=key.id, model_id=model.id, task_type="text",
-        prompt=prompt, params_json=json.dumps(params, ensure_ascii=False) if params else None,
-        status="processing", cost_status="frozen", cost=cost,
+    task = await run_db(
+        _create_openai_task, db, request_id=request_id, user_id=key.id,
+        model=model, prompt=prompt, params=params, cost=cost,
     )
-    db.add(task)
-    db.flush()
-    billing.freeze(db, key.id, cost, task_id=task.id)
-    db.commit()
 
     # ---------- 非流式 ----------
     if not body.stream:
@@ -188,14 +233,12 @@ async def chat_completions(
                 "provider_timeout" if is_timeout else "internal_error"
             )
             message = "生成超时,本次不扣费" if is_timeout else "生成失败,本次不扣费"
-            latency_ms = int((time.monotonic() - start) * 1000)
-            _mark_task_failed(db, task, key.id, cost, message)
-            _write_call_log(db, request_id=request_id, user_id=key.id, model_id=model.id,
-                            vendor=provider.vendor, start=start, success=False,
-                            error_code=str(error_code))
-            _write_usage_log(db, key_id=request.state.api_key_id, user_id=key.id,
-                             path=request.url.path, model_id=model.id,
-                             status_code=502, latency_ms=latency_ms)
+            await run_db(
+                _finish_failure, db, task_id=task.id, key_id=key.id,
+                api_key_id=request.state.api_key_id, path=request.url.path,
+                model_id=model.id, vendor=provider.vendor, request_id=request_id,
+                start=start, cost=cost, message=message, error_code=str(error_code),
+            )
             raise APIError(502, "生成失败,本次不扣费")
 
         content = result["content"]
@@ -204,19 +247,12 @@ async def chat_completions(
         completion_tokens = int(usage.get("completion_tokens") or _estimate_tokens(content))
         latency_ms = int((time.monotonic() - start) * 1000)
 
-        # 成功结算:任务 succeeded + settle + 日志
-        task.status = "succeeded"
-        task.result_text = content
-        task.cost_status = "settled"
-        task.latency_ms = latency_ms
-        db.commit()
-        billing.settle(db, key.id, cost, task_id=task.id, model_id=model.id)
-        db.commit()
-        _write_call_log(db, request_id=request_id, user_id=key.id, model_id=model.id,
-                        vendor=provider.vendor, start=start, success=True, error_code=None)
-        _write_usage_log(db, key_id=request.state.api_key_id, user_id=key.id,
-                         path=request.url.path, model_id=model.id,
-                         status_code=200, latency_ms=latency_ms)
+        await run_db(
+            _finish_success, db, task=task, key_id=key.id,
+            api_key_id=request.state.api_key_id, path=request.url.path,
+            model=model, vendor=provider.vendor, request_id=request_id,
+            start=start, content=content, cost=cost,
+        )
         return {
             "id": chatcmpl_id,
             "object": "chat.completion",
@@ -238,7 +274,8 @@ async def chat_completions(
     provider = get_provider(model)
 
     async def stream_gen() -> AsyncIterator[str]:
-        # SSE 生成器生命周期长于请求,自建会话,不用请求级 db
+        # SSE 生成器生命周期长于请求,自建会话,不用请求级 db;
+        # 落库经 run_db 放线程池;断连(CancelledError/GeneratorExit)分支保持同步直调
         sdb = SessionLocal()
         gen_start = time.monotonic()
         reply: list[str] = []
@@ -261,20 +298,13 @@ async def chat_completions(
                         })
 
             text = "".join(reply)
-            stask = sdb.get(AiTask, task.id)
-            stask.status = "succeeded"
-            stask.result_text = text
-            stask.cost_status = "settled"
-            stask.latency_ms = int((time.monotonic() - gen_start) * 1000)
-            sdb.commit()
-            billing.settle(sdb, key.id, cost, task_id=task.id, model_id=model.id)
-            sdb.commit()
-            _write_call_log(sdb, request_id=request_id, user_id=key.id, model_id=model.id,
-                            vendor=provider.vendor, start=gen_start, success=True,
-                            error_code=None)
-            _write_usage_log(sdb, key_id=request.state.api_key_id, user_id=key.id,
-                             path=request.url.path, model_id=model.id, status_code=200,
-                             latency_ms=int((time.monotonic() - gen_start) * 1000))
+            stask = await run_db(sdb.get, AiTask, task.id)
+            await run_db(
+                _finish_success, sdb, task=stask, key_id=key.id,
+                api_key_id=request.state.api_key_id, path=request.url.path,
+                model=model, vendor=provider.vendor, request_id=request_id,
+                start=gen_start, content=text, cost=cost,
+            )
             success = True
             yield _sse({
                 "id": chatcmpl_id, "object": "chat.completion.chunk",
@@ -283,7 +313,8 @@ async def chat_completions(
             })
             yield "data: [DONE]\n\n"
         except (asyncio.CancelledError, GeneratorExit):
-            # 客户端断连:按失败处理(不扣费),不可再 yield
+            # 客户端断连:按失败处理(不扣费),不可再 yield;
+            # 取消路径内不再 await(二次取消会丢失收尾),保持同步直调
             _mark_task_failed(sdb, sdb.get(AiTask, task.id), key.id, cost, "生成中断,本次不扣费")
             _write_call_log(sdb, request_id=request_id, user_id=key.id, model_id=model.id,
                             vendor=provider.vendor, start=gen_start, success=False,
@@ -298,13 +329,12 @@ async def chat_completions(
                 "provider_timeout" if is_timeout else "internal_error"
             ))
             message = "生成超时,本次不扣费" if is_timeout else "生成失败,本次不扣费"
-            _mark_task_failed(sdb, sdb.get(AiTask, task.id), key.id, cost, message)
-            _write_call_log(sdb, request_id=request_id, user_id=key.id, model_id=model.id,
-                            vendor=provider.vendor, start=gen_start, success=False,
-                            error_code=error_code)
-            _write_usage_log(sdb, key_id=request.state.api_key_id, user_id=key.id,
-                             path=request.url.path, model_id=model.id, status_code=502,
-                             latency_ms=int((time.monotonic() - gen_start) * 1000))
+            await run_db(
+                _finish_failure, sdb, task_id=task.id, key_id=key.id,
+                api_key_id=request.state.api_key_id, path=request.url.path,
+                model_id=model.id, vendor=provider.vendor, request_id=request_id,
+                start=gen_start, cost=cost, message=message, error_code=error_code,
+            )
             yield _sse({"error": {"message": "生成失败,本次不扣费"}})
             yield "data: [DONE]\n\n"
         finally:

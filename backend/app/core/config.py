@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     video_poll_interval_sec: int = 5
     video_poll_max_sec: int = 300
 
+    # --- 性能固化(WP09) ---
+    slow_query_ms: int = 500            # 慢查询日志阈值(毫秒),超过记 warning
+    mock_delay_sec: float | None = None # Mock 全局显式延迟(秒,测试/演示用;None=2-5s 随机)
+
     @field_validator("database_url", "secret_key")
     @classmethod
     def _not_blank(cls, v: str, info) -> str:

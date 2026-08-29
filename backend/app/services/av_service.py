@@ -7,6 +7,7 @@
   建 ai_tasks(pending/frozen)→ start_background_task 后台执行;
 - 上传校验:扩展名白名单 + 10MB 上限 + 文件头魔数,三者全过才落盘。
 """
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -20,7 +21,7 @@ from app.core.response import APIError
 from app.models.ai_task import AiTask
 from app.models.model import Model
 from app.models.support import User
-from app.services import billing, task_service
+from app.services import billing
 
 # ---------- 上传常量 ----------
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
@@ -68,8 +69,8 @@ async def save_upload(file: UploadFile) -> dict:
 
     filename = f"{uuid.uuid4().hex[:12]}-{raw_name}"
     upload_dir = Path(get_settings().upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    (upload_dir / filename).write_bytes(content)
+    await asyncio.to_thread(upload_dir.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread((upload_dir / filename).write_bytes, content)
     return {"url": f"/static/{filename}", "filename": filename, "size": len(content)}
 
 
@@ -106,7 +107,11 @@ def check_duration(params: dict, model: Model) -> None:
 
 def submit_av_task(db: Session, user: User, model: Model, task_type: str,
                    prompt: str | None, params: dict) -> AiTask:
-    """四态提交通道:幂等 409 → 冻结 → 建 pending 任务 → 后台执行,与图像任务同链路。"""
+    """四态提交通道:幂等 409 → 冻结 → 建 pending 任务,与图像任务同链路。
+
+    只做落库,不启动后台执行——本函数会被路由经 run_db 放线程池调用,
+    线程内没有事件循环;start_background_task 由调用方在事件循环上调用。
+    """
     dup = (
         db.query(AiTask)
         .filter(AiTask.request_id == current_request_id(), AiTask.user_id == user.id)
@@ -125,5 +130,4 @@ def submit_av_task(db: Session, user: User, model: Model, task_type: str,
     db.add(task)
     db.commit()
     db.refresh(task)
-    task_service.start_background_task(task.id)
     return task

@@ -16,7 +16,7 @@ from typing import AsyncIterator
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal
+from app.core.db import SessionLocal, run_db
 from app.core.response import APIError
 from app.models.ai_call_log import AiCallLog
 from app.models.ai_task import AiTask
@@ -153,6 +153,22 @@ def _write_call_log(db: Session, *, request_id: str, user_id: int, model, provid
         logger.exception("ai_call_logs 落库失败(request_id=%s)", request_id)
 
 
+def _persist_reply(db: Session, *, session_id: int, model, text: str, tokens: int,
+                   task_id: int, user_id: int, cost: int, start: float) -> None:
+    """成功收尾:写 assistant 消息 + 任务 succeeded + settle(线程池内执行)。"""
+    db.add(ChatMessage(session_id=session_id, role="assistant", content=text,
+                       model_id=model.id, tokens_used=tokens))
+    task = db.get(AiTask, task_id)
+    if task is not None:
+        task.status = "succeeded"
+        task.result_text = text
+        task.cost_status = "settled"
+        task.latency_ms = int((time.monotonic() - start) * 1000)
+    db.commit()
+    billing.settle(db, user_id, cost, task_id=task_id, model_id=model.id)
+    db.commit()
+
+
 async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: int,
                             cost: int, request_id: str, prompt: str) -> AsyncIterator[str]:
     """SSE 流式回复生成器(建流前的校验/冻结/建任务已由路由完成)。
@@ -162,6 +178,8 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
     - data: {"done": true, "task_id": N, "cost": N}  正常结束(已结算);
     - data: {"error": {"code": "...", "message": "生成失败,本次不扣费"}}  失败结束(已退费)。
     超时控制:首字节 sse_first_byte_timeout 秒,总时长 sse_total_timeout 秒。
+    落库经 run_db 放线程池;断连(CancelledError/GeneratorExit)分支保持同步直调,
+    避免二次取消丢失收尾。
     """
     s = get_settings()
     provider = get_provider(model)
@@ -172,7 +190,8 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
     usage: dict = {}
     success = False
     error_code: str | None = None
-    stream = provider.generate_text(model, recent_messages(db, session_id)).__aiter__()
+    history = await run_db(recent_messages, db, session_id)
+    stream = provider.generate_text(model, history).__aiter__()
     try:
         chunk = None
         got_first = False
@@ -196,21 +215,13 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
 
         text = "".join(reply)
         tokens = int(usage.get("total_tokens") or estimate_tokens(prompt, text))
-        db.add(ChatMessage(session_id=session_id, role="assistant", content=text,
-                           model_id=model.id, tokens_used=tokens))
-        task = db.get(AiTask, task_id)
-        if task is not None:
-            task.status = "succeeded"
-            task.result_text = text
-            task.cost_status = "settled"
-            task.latency_ms = int((time.monotonic() - start) * 1000)
-        db.commit()
-        billing.settle(db, user_id, cost, task_id=task_id, model_id=model.id)
-        db.commit()
+        await run_db(_persist_reply, db, session_id=session_id, model=model, text=text,
+                     tokens=tokens, task_id=task_id, user_id=user_id, cost=cost, start=start)
         success = True
         yield sse_frame({"done": True, "task_id": task_id, "cost": cost})
     except (asyncio.CancelledError, GeneratorExit):
-        # 客户端断连/任务被取消:按失败处理(不扣费),不可再 yield,清理后原样抛出
+        # 客户端断连/任务被取消:按失败处理(不扣费),不可再 yield,清理后原样抛出;
+        # 取消路径内不再 await(二次取消会丢失收尾),保持同步直调
         _mark_text_failed(db, task_id, user_id,
                           ProviderError("client_disconnected", "生成中断,本次不扣费"), start)
         raise
@@ -220,7 +231,7 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
             error_code = error_code or "provider_timeout"
         else:
             error_code = error_code or "internal_error"
-        _mark_text_failed(db, task_id, user_id, exc, start)
+        await run_db(_mark_text_failed, db, task_id, user_id, exc, start)
         message = "生成超时,本次不扣费" if _timeout_exc(exc) else "生成失败,本次不扣费"
         yield sse_frame({"error": {"code": str(error_code), "message": message}})
     finally:

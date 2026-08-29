@@ -99,3 +99,56 @@ uvicorn app.main:app --reload --port 8000
 # 用 httpx.MockTransport 模拟 Ollama SSE/JSON 响应,覆盖流式/非流式/探活/缓存/联动
 ```
 
+## 性能与稳定性参数(WP09 固化,D6 后冻结)
+
+> 以下参数自 WP09 起固化,**D6 之后冻结**,调整需走全组评审并同步 `.env.example`。
+
+### 连接池(`app/core/db.py`,MySQL 分支)
+
+| 参数 | 值 | 说明 |
+| --- | --- | --- |
+| `pool_size` | 20 | 常驻连接数 |
+| `max_overflow` | 10 | 突发溢出连接上限(峰值 30) |
+| `pool_recycle` | 1800 | 空闲连接 30 分钟回收,避免 MySQL wait_timeout 断连 |
+| `pool_pre_ping` | True | 每次取连接前探活 |
+
+sqlite 分支(测试/演示)不套用上述池参数,保持 `check_same_thread=False`。
+
+### 慢查询日志
+
+`app/core/db.py` 经 SQLAlchemy `before/after_cursor_execute` 事件记录单条 SQL 耗时,
+超过 `SLOW_QUERY_MS`(默认 **500ms**)记 warning 日志(logger `app.db`)。
+
+### 超时 / 重试 / 限流(来自 `.env.example`)
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PROVIDER_CONNECT_TIMEOUT` | 10s | 上游连接超时 |
+| `PROVIDER_READ_TIMEOUT_TEXT / IMAGE / AV` | 60 / 120 / 300s | 按任务类型读取超时 |
+| `PROVIDER_MAX_RETRIES` | 2 | 仅幂等请求,指数退避 1s/2s |
+| `SSE_FIRST_BYTE_TIMEOUT` | 15s | 流式首字节超时 |
+| `SSE_TOTAL_TIMEOUT` | 120s | 单次流式总时长上限 |
+| `OPENAPI_RATE_LIMIT_PER_MIN` | 30 | 单 API Key 每分钟调用上限 |
+| `VIDEO_POLL_INTERVAL_SEC / MAX_SEC` | 5 / 300 | 视频句柄轮询间隔/上限 |
+| `JWT_EXPIRE_HOURS` | 24 | 登录态有效期 |
+
+### HTTP 连接复用(WP09 就绪,WP10 接入)
+
+`app/core/http_client.py` 提供进程级共享 `httpx.AsyncClient` 单例
+(`max_connections=100 / max_keepalive_connections=20`)。本期 providers 层
+尚未接入(登记 TODO),WP10 由 `providers/base.py` 逐步替换为复用该单例。
+
+### Mock 显式延迟(测试/演示用)
+
+`MockProvider` 支持 `mock_delay_sec` 覆盖默认 2-5s 随机延迟,优先级:
+`params["mock_delay_sec"]` > `models.config_json` > 全局 `MOCK_DELAY_SEC`。
+用于超时链路演练(如 `mock_delay_sec=5` + `SSE_TOTAL_TIMEOUT=2` 验证「生成超时不扣费」)。
+
+### 稳定性测试与演示数据
+
+```bash
+.venv/Scripts/python scripts/test_m_series.py   # M-01~M-08 稳定性用例,结果写 docs/m-series-result.md
+DATABASE_URL=sqlite:///./demo.db SECRET_KEY=demo .venv/Scripts/python scripts/seed_demo.py
+# 演示数据(2 用户/4 模型/任务/会话/调用日志),幂等可重复执行
+```
+

@@ -13,10 +13,31 @@ from typing import Any, Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
+from app.core.db import run_db
 from app.models.ai_call_log import AiCallLog
 from app.providers.exceptions import ProviderError
 
 logger = logging.getLogger("app.call_log")
+
+
+def _write_log(db: Session, *, request_id: str, user_id: int | None, model, provider,
+               latency_ms: int, success: bool, error_code: str | None) -> None:
+    try:
+        db.add(
+            AiCallLog(
+                request_id=request_id,
+                user_id=user_id,
+                model_id=getattr(model, "id", None),
+                provider=getattr(provider, "vendor", "unknown"),
+                latency_ms=latency_ms,
+                success=success,
+                error_code=error_code,
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001 日志失败不影响主流程
+        db.rollback()
+        logger.exception("ai_call_logs 落库失败(request_id=%s)", request_id)
 
 
 async def log_provider_call(
@@ -47,19 +68,8 @@ async def log_provider_call(
         raise error from exc
     finally:
         latency_ms = int((time.monotonic() - start) * 1000)
-        try:
-            db.add(
-                AiCallLog(
-                    request_id=request_id,
-                    user_id=user_id,
-                    model_id=getattr(model, "id", None),
-                    provider=getattr(provider, "vendor", "unknown"),
-                    latency_ms=latency_ms,
-                    success=error is None,
-                    error_code=error.code if error else None,
-                )
-            )
-            db.commit()
-        except Exception:  # noqa: BLE001 日志失败不影响主流程
-            db.rollback()
-            logger.exception("ai_call_logs 落库失败(request_id=%s)", request_id)
+        # 落库放线程池,不阻塞事件循环;失败已在 _write_log 内吞掉
+        await run_db(_write_log, db, request_id=request_id, user_id=user_id,
+                     model=model, provider=provider, latency_ms=latency_ms,
+                     success=error is None,
+                     error_code=error.code if error else None)

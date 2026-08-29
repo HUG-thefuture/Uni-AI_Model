@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 
 from app.core.config import get_settings
-from app.core.db import SessionLocal
+from app.core.db import SessionLocal, run_db
 from app.models.ai_call_log import AiCallLog
 from app.models.ai_task import AiTask
 from app.models.model import Model
@@ -82,8 +82,41 @@ async def _poll_video_result(provider, model, handle: dict) -> str:
     raise ProviderError("provider_timeout", "视频生成超时,本次不扣费")
 
 
+def _load_and_start(db, task_id: int) -> tuple[AiTask | None, Model | None, dict]:
+    """加载任务/模型并置 processing(线程池内执行,不阻塞事件循环)。"""
+    task = db.get(AiTask, task_id)
+    if task is None:
+        return None, None, {}
+    model = db.get(Model, task.model_id)
+    task.status = "processing"
+    db.commit()
+    params: dict = {}
+    if task.params_json:
+        try:
+            params = json.loads(task.params_json)
+        except ValueError:
+            params = {}
+    return task, model, params
+
+
+def _finalize_success(db, task: AiTask, model: Model, start: float) -> None:
+    """成功收尾:结算 + status=succeeded(线程池内执行)。"""
+    billing.settle(db, task.user_id, task.cost, task_id=task.id, model_id=model.id)
+    task.cost_status = "settled"
+    task.status = "succeeded"
+    task.error_message = None
+    task.latency_ms = int((time.monotonic() - start) * 1000)
+    db.commit()
+
+
 async def run_async_task(task_id: int) -> None:
-    """统一执行器:任何异常都在本函数内消化,绝不向 asyncio 顶层抛出。"""
+    """统一执行器:任何异常都在本函数内消化,绝不向 asyncio 顶层抛出。
+
+    DB 读写策略:初始加载保持同步直调——后台任务可能在短生命周期事件循环
+    (如测试 portal)中执行,首个 await 前先完成建流可避免任务被静默丢弃;
+    成功收尾经 run_db 放线程池。_fail_task 与 finally 落库可能运行于取消路径,
+    保持同步直调,避免二次取消丢失收尾。
+    """
     db = SessionLocal()
     start = time.monotonic()
     task: AiTask | None = None
@@ -91,22 +124,12 @@ async def run_async_task(task_id: int) -> None:
     success = False
     error_code: str | None = None
     try:
-        task = db.get(AiTask, task_id)
+        task, model, params = _load_and_start(db, task_id)
         if task is None:
             logger.warning("任务 %s 不存在,跳过执行", task_id)
             return
-        model = db.get(Model, task.model_id)
         if model is None:
             raise ProviderError("model_not_found", "任务对应的模型不存在")
-        task.status = "processing"
-        db.commit()
-
-        params: dict = {}
-        if task.params_json:
-            try:
-                params = json.loads(task.params_json)
-            except ValueError:
-                params = {}
         provider = get_provider(model)
         task_type = task.task_type or model.model_type
 
@@ -160,12 +183,7 @@ async def run_async_task(task_id: int) -> None:
         else:
             raise ProviderError("not_implemented", "该任务类型暂未开放,请等待后续版本")
 
-        billing.settle(db, task.user_id, task.cost, task_id=task.id, model_id=model.id)
-        task.cost_status = "settled"
-        task.status = "succeeded"
-        task.error_message = None
-        task.latency_ms = int((time.monotonic() - start) * 1000)
-        db.commit()
+        await run_db(_finalize_success, db, task, model, start)
         success = True
     except (asyncio.TimeoutError, TimeoutError):
         error_code = "provider_timeout"
