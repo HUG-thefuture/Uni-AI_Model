@@ -1,7 +1,9 @@
-"""门户端模型广场路由(WP03)。
+"""门户端模型广场路由(WP03,WP08 增强)。
 
 - GET /models:需登录(get_current_user),仅返回 enabled 模型,
   不暴露 endpoint 与 config_json;
+  WP08:每项透传 available 字段(local 模型轻量探活 + 60s 缓存,逻辑在
+  services/model_service.model_to_portal,路由层只透传);
 - 路径不写 /api 前缀(main.py 统一挂载 /api 与 /api/v1)。
 """
 from fastapi import APIRouter, Depends, Query

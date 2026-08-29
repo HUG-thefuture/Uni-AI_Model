@@ -2,7 +2,8 @@
 
 - GET    /admin/models           全量分页(含 disabled),支持 keyword/category/type 筛选
 - POST   /admin/models           创建(model_code+provider_type 唯一,冲突 409)
-- GET    /admin/models/{id}      详情(含 config_json + 近 7 天调用量与成功率)
+- GET    /admin/models/{id}      详情(含 config_json + 近 7 天调用量/成功率 +
+                                daily_stats 逐日统计 + error_stats 错误分布,WP08)
 - PUT    /admin/models/{id}      部分更新
 - PUT    /admin/models/{id}/status  启用/停用
 - DELETE /admin/models/{id}      物理删除(被进行中任务引用则 409)
@@ -58,7 +59,7 @@ def get_model(
     admin=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """模型详情:全量字段 + 近 7 天调用量与成功率;不存在 404。"""
+    """模型详情:全量字段 + 近 7 天调用量/成功率 + 逐日统计 + 错误分布;不存在 404。"""
     return ok(data=model_service.get_model_detail(db, model_id))
 
 

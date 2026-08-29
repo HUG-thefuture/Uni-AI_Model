@@ -66,8 +66,10 @@ class BaseProvider(abc.ABC):
 
     def _timeout(self, model_type: str) -> httpx.Timeout:
         s = get_settings()
+        # httpx>=0.28 要求显式 default 或四参数齐全;写/池超时与读取同限
+        read = s.read_timeouts.get(model_type, 60)
         return httpx.Timeout(
-            connect=s.provider_connect_timeout, read=s.read_timeouts.get(model_type, 60)
+            connect=s.provider_connect_timeout, read=read, write=read, pool=read
         )
 
     @staticmethod

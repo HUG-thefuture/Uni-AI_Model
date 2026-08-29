@@ -1,14 +1,17 @@
-"""模型广场与模型管理业务逻辑(WP03)。
+"""模型广场与模型管理业务逻辑(WP03,WP08 增强)。
 
 - 门户列表仅返回 status=enabled,且不暴露 endpoint 与 config_json;
+  WP08:每项增加 available 字段(local 模型轻量探活 Ollama,60s 缓存;
+  online/mock 恒 True 不做真实探活,避免拖慢列表);
 - 管理端全量分页(含 disabled),创建/更新校验 model_code+provider_type 唯一;
+  WP08:详情增加 daily_stats(近 7 天逐日调用量)与 error_stats(错误分布 top10);
 - 删除前置校验:存在 status IN (pending, processing) 的 ai_tasks 引用则 409 拒绝;
 - 写操作统一写 operation_logs(user_id / action / resource_type="models" / detail_json)。
 """
 import json
 from datetime import datetime, timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Query, Session
 
 from app.core.response import APIError
@@ -84,8 +87,26 @@ def _parse_config_json(raw: str | None):
         return raw
 
 
+def _model_available(model: Model) -> bool:
+    """门户列表 available 字段(WP08):
+
+    - local 模型:轻量探活 Ollama /api/tags(2s 超时,模块级缓存 60s),失败/超时
+      一律 False 且异常全部吞掉,不阻塞列表返回;
+    - online / mock 模型:恒 True —— 不做真实探活,避免对 siliconflow 的 HTTP 探测
+      拖慢列表接口(mock 本就不发起外部请求,恒可用)。
+    """
+    if model.provider_type == "local":
+        from app.providers.local import LocalProvider
+
+        try:
+            return LocalProvider.probe_available(model.endpoint)
+        except Exception:  # noqa: BLE001 双保险:探活任何异常都不影响列表
+            return False
+    return True
+
+
 def model_to_portal(model: Model) -> dict:
-    """门户端条目:不含 endpoint 与 config_json,不暴露调用细节。"""
+    """门户端条目:不含 endpoint 与 config_json,不暴露调用细节;available 为在线状态。"""
     return {
         "id": model.id,
         "name": model.name,
@@ -96,6 +117,7 @@ def model_to_portal(model: Model) -> dict:
         "capability_tags": model.capability_tags,
         "price_per_call": model.price_per_call,
         "status": model.status,
+        "available": _model_available(model),
     }
 
 
@@ -298,8 +320,49 @@ def delete_model(db: Session, user_id: int, model_id: int) -> None:
     db.commit()
 
 
+def _daily_stats_7d(db: Session, model_id: int, since: datetime) -> list[dict]:
+    """近 7 天逐日调用量:ai_call_logs 按 DATE(created_at) 聚合。
+
+    func.date() 在 sqlite 与 MySQL 下均兼容;补齐无调用日期为 0,升序输出。
+    """
+    rows = (
+        db.query(
+            func.date(AiCallLog.created_at).label("day"),
+            func.count(AiCallLog.id).label("total"),
+            func.sum(case((AiCallLog.success.is_(True), 1), else_=0)).label("success"),
+        )
+        .filter(AiCallLog.model_id == model_id, AiCallLog.created_at >= since)
+        .group_by(func.date(AiCallLog.created_at))
+        .all()
+    )
+    by_day = {str(r.day): {"total": int(r.total), "success": int(r.success or 0)} for r in rows}
+    stats: list[dict] = []
+    for offset in range(6, -1, -1):  # 6 天前 → 今天,共 7 天
+        day = (datetime.now() - timedelta(days=offset)).strftime("%Y-%m-%d")
+        day_stat = by_day.get(day, {"total": 0, "success": 0})
+        stats.append({"date": day, "total": day_stat["total"], "success": day_stat["success"]})
+    return stats
+
+
+def _error_stats_7d(db: Session, model_id: int, since: datetime) -> list[dict]:
+    """最近错误分布:success=0 的记录按 error_code 计数,前 10,按次数倒序。"""
+    rows = (
+        db.query(AiCallLog.error_code, func.count(AiCallLog.id).label("count"))
+        .filter(
+            AiCallLog.model_id == model_id,
+            AiCallLog.created_at >= since,
+            AiCallLog.success.is_(False),
+        )
+        .group_by(AiCallLog.error_code)
+        .order_by(func.count(AiCallLog.id).desc())
+        .limit(10)
+        .all()
+    )
+    return [{"error_code": r[0] or "unknown", "count": int(r[1])} for r in rows]
+
+
 def get_model_detail(db: Session, model_id: int) -> dict:
-    """管理端详情:全量字段 + 近 7 天调用量与成功率(查 ai_call_logs)。"""
+    """管理端详情:全量字段 + 近 7 天调用量/成功率 + 逐日统计 + 错误分布(查 ai_call_logs)。"""
     model = _get_model_or_404(db, model_id)
     since = datetime.now() - timedelta(days=7)
     total = (
@@ -321,4 +384,6 @@ def get_model_detail(db: Session, model_id: int) -> dict:
         "success": success,
         "success_rate": success_rate,
     }
+    detail["daily_stats"] = _daily_stats_7d(db, model_id, since)
+    detail["error_stats"] = _error_stats_7d(db, model_id, since)
     return detail
