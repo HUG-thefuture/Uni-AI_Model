@@ -1,0 +1,61 @@
+{
+  "_说明": "models 表终版配置导出口径(WP10,与 docs/model-config-template.json 同源,共 4 个模型)。status/config_json 与线上一致;密钥不在本文件——SILICONFLOW_API_KEY 只存环境变量,OLLAMA_BASE_URL 走 .env,models 表中严禁出现任何密钥。config_json 为 JSON 字符串(与 models.config_json Text 列口径一致),只存 temperature/max_tokens 等非敏感参数。status: enabled/disabled。可通过 python scripts/seed_models.py 幂等写入 models 表。",
+  "models": [
+    {
+      "name": "Qwen2.5-7B 对话(线上)",
+      "model_code": "Qwen/Qwen2.5-7B-Instruct",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "硅基流动托管的中英文对话模型,用于文本对话主链路",
+      "capability_tags": ["对话", "推理"]
+    },
+    {
+      "name": "Stable Diffusion 文生图(线上)",
+      "model_code": "stabilityai/stable-diffusion-3-5-large",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 10,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"image_size\": \"1024x1024\", \"num_inference_steps\": 28}",
+      "description": "硅基流动文生图模型,用于图像生成任务",
+      "capability_tags": ["图像生成"]
+    },
+    {
+      "name": "Qwen2.5 3B(本地 Ollama)",
+      "model_code": "qwen2.5:3b",
+      "provider_type": "local",
+      "model_type": "text",
+      "vendor": "ollama",
+      "endpoint": "http://localhost:11434",
+      "price_per_call": 0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"num_ctx\": 4096}",
+      "description": "Ollama 本地部署的小参数对话模型,免费演示与断网兜底",
+      "capability_tags": ["对话", "本地"]
+    },
+    {
+      "name": "Qwen2.5 1.5B(本地 Ollama)",
+      "model_code": "qwen2.5:1.5b",
+      "provider_type": "local",
+      "model_type": "text",
+      "vendor": "ollama",
+      "endpoint": "http://localhost:11434",
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7}",
+      "description": "Ollama 本地小参数模型,免费演示与断网兜底",
+      "capability_tags": ["对话", "本地"]
+    }
+  ]
+}

@@ -152,3 +152,109 @@ DATABASE_URL=sqlite:///./demo.db SECRET_KEY=demo .venv/Scripts/python scripts/se
 # 演示数据(2 用户/4 模型/任务/会话/调用日志),幂等可重复执行
 ```
 
+## 环境要求(WP10 补全)
+
+| 组件 | 版本要求 | 说明 |
+| --- | --- | --- |
+| Python | **3.11.9**(3.11+) | 仓库根 `.python-version` 已锁定;pyenv/uv 自动识别 |
+| MySQL | **8.0** | 生产/联调库;本地演示可用 sqlite(见 seed_demo 示例) |
+| Ollama | 可选 | 本地模型(qwen2.5)演示用;不装则 local 模型 available=false,其余功能不受影响 |
+
+## .env 变量说明(对照 .env.example,全部变量)
+
+| 变量 | 必填 | 默认 | 用途 |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | **是** | — | 数据库连接串,缺失启动即失败。MySQL 示例:`mysql+pymysql://root:password@127.0.0.1:3306/ai_portal?charset=utf8mb4`;sqlite 示例:`sqlite:///./demo.db` |
+| `SECRET_KEY` | **是** | — | JWT 签名密钥,缺失启动即失败;生产必须更换,禁止提交真实值 |
+| `SILICONFLOW_API_KEY` | 否 | `""` | 硅基流动 API Key(https://cloud.siliconflow.cn);只存环境变量,绝不入库绝不进 git;为空时线上模型调用报中文错误,可用 Mock 全链路联调 |
+| `OLLAMA_BASE_URL` | 否 | `http://localhost:11434` | Ollama 本地服务地址;models.endpoint 未配置时也作为调用端点回退 |
+| `PROVIDER_CONNECT_TIMEOUT` | 否 | `10` | 上游连接超时(秒) |
+| `PROVIDER_READ_TIMEOUT_TEXT` | 否 | `60` | 文本任务读取超时(秒) |
+| `PROVIDER_READ_TIMEOUT_IMAGE` | 否 | `120` | 图像任务读取超时(秒) |
+| `PROVIDER_READ_TIMEOUT_AV` | 否 | `300` | 音频/视频任务读取超时(秒) |
+| `PROVIDER_MAX_RETRIES` | 否 | `2` | 失败重试次数(仅幂等请求,指数退避 1s/2s) |
+| `API_PREFIX` | 否 | `/api` | 接口前缀(全组冻结为 /api);另自动挂 /api/v1 兼容别名 |
+| `LOG_LEVEL` | 否 | `INFO` | 日志级别 DEBUG/INFO/WARNING |
+| `JWT_EXPIRE_HOURS` | 否 | `24` | JWT 有效期(小时,全组冻结 24h) |
+| `SSE_FIRST_BYTE_TIMEOUT` | 否 | `15` | 流式上游首字节超时(秒) |
+| `SSE_TOTAL_TIMEOUT` | 否 | `120` | 单次流式总时长上限(秒) |
+| `UPLOAD_DIR` | 否 | `uploads` | 上传文件落盘目录(相对 backend/ 或绝对路径),经 /static 访问 |
+| `OPENAPI_RATE_LIMIT_PER_MIN` | 否 | `30` | 单 API Key 每分钟调用上限(开放平台) |
+| `VIDEO_POLL_INTERVAL_SEC` | 否 | `5` | 视频句柄轮询间隔(秒) |
+| `VIDEO_POLL_MAX_SEC` | 否 | `300` | 视频轮询总上限(秒),超时判 failed 不扣费 |
+| `SLOW_QUERY_MS` | 否 | `500` | 慢查询日志阈值(毫秒),超过记 warning(logger `app.db`);在 config.py 中定义,未列入 .env.example 也可直接设环境变量覆盖 |
+| `MOCK_DELAY_SEC` | 否 | `None` | Mock 全局显式延迟(秒,测试/演示用);None=2-5s 随机 |
+
+`DATABASE_URL` / `SECRET_KEY` 为必填,缺失时启动即失败并明确提示缺哪个变量。
+
+## 本地启动步骤(全新环境)
+
+```bash
+cd backend
+
+# 1. 创建虚拟环境(建议 3.11.9)
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1 / Git Bash: source .venv/Scripts/activate
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 准备 .env
+copy .env.example .env        # Linux/macOS: cp .env.example .env
+# 编辑 .env:必填 DATABASE_URL / SECRET_KEY;联调线上模型填 SILICONFLOW_API_KEY
+
+# 4. 初始化数据库(幂等建表)
+python -m app.init_db
+
+# 5. 写入 4 个种子模型(幂等 upsert:线上对话/线上文生图 + 本地 qwen2.5:3b / 1.5b)
+python scripts/seed_models.py
+
+# 6. (可选)写入演示数据:2 个演示用户 + 任务/会话/调用日志,断网演示可用
+DATABASE_URL=sqlite:///./demo.db SECRET_KEY=demo python scripts/seed_demo.py
+
+# 7. 启动
+uvicorn app.main:app --reload --port 8000
+# 探针: curl http://127.0.0.1:8000/api/health
+# 接口文档: http://127.0.0.1:8000/api/docs (Swagger UI)
+```
+
+## 初始化命令一览
+
+| 命令 | 作用 |
+| --- | --- |
+| `python -m app.init_db` | 幂等建表(Base.metadata.create_all,已有表不受影响) |
+| `python scripts/seed_models.py` | 从 `docs/model-config-template.json` 幂等写入/更新 4 个模型 |
+| `python scripts/seed_demo.py` | 演示数据(demo_user/demo_admin、钱包余额 1000、任务/会话/日志),幂等可重复执行 |
+| `python scripts/test_m_series.py` | M-01~M-08 稳定性用例,结果写 `docs/m-series-result.md` |
+
+管理员账号由成员1 提供(`POST /api/auth/register` 注册后置 role=admin,或用 seed_demo 的 demo_admin);模型管理接口 `/api/admin/models` 全部需要管理员 JWT。
+
+## 常见问题
+
+### 1. Ollama 未启动
+
+- 现象:门户 `GET /api/models` 中本地模型 `available=false`(探活 2s 超时,结果缓存 60s,期间不重试);发起对话返回错误「本地模型服务未启动,请联系管理员」(error_code=provider_unreachable),任务失败不扣费。
+- 处理:启动 Ollama(`ollama serve` / 桌面端启动),确认 `ollama list` 有对应模型;`GET /api/admin/models/{id}` 的 error_stats 可看到 provider_unreachable 计数。缓存过期(≤60s)后 available 自动恢复 true。
+
+### 2. API Key 无效(401 排查项)
+
+`POST /api/chat/completions` 返回 401「API Key 无效或已禁用」时依次检查:
+
+1. 请求头是否为 `Authorization: Bearer sk-xxx`(Bearer 后有一个空格;Key 以 sk- 开头);
+2. Key 是否抄错(库内只存 sha256 哈希,明文丢失无法找回,只能重新生成);
+3. api_keys.status 是否为 enabled(禁用立即生效);
+4. Key 是否过期(expires_at < 当前时间);
+5. Key 所属 users.status 是否为 1(用户被禁用时 Key 一并失效)。
+
+### 3. SSE 被 Nginx 缓冲(流式输出变成"一次性吐出")
+
+- 后端响应已带 `X-Accel-Buffering: no`(业务 SSE 与开放平台流式均带),Nginx 应遵守该头;
+- 若仍被缓冲,在 Nginx 对应 location 显式加:`proxy_buffering off;`(并确认未开 gzip 对 text/event-stream);
+- 客户端测试时用 `curl -N` 关闭本地缓冲。
+
+### 4. 慢查询日志在哪看
+
+- `app/core/db.py` 经 SQLAlchemy 事件统计单条 SQL 耗时,超过 `SLOW_QUERY_MS`(默认 500ms)以 **warning** 级别输出,logger 名为 **`app.db`**;
+- 后台用 uvicorn 直跑时直接看 stdout(uvicorn 默认日志与 SQL 慢日志混排,含时间戳与 SQL 语句);按 `LOG_LEVEL=INFO` 起即可看到 warning;
+- 生产若日志进了文件,`grep "app.db"` 或按 warning 级别过滤即可定位慢 SQL。
+

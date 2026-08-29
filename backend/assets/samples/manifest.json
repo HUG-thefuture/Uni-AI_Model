@@ -1,0 +1,47 @@
+{
+  "_说明": "backend/assets/samples 演示样例登记(WP10)。文本样例供开放平台/会话接口演示与冒烟脚本复用;图像样例为 MockProvider 图像 URL 的离线替换物(断网时把文件复制到 backend/uploads/ 后以 /static/<文件名> 访问,或临时改 providers/mock.py 的 MOCK_IMAGE_URL 指向 /static 路径)。密钥与真实素材不在本目录,音频/视频走公网兜底(见 audio_video_fallback)。",
+  "version": "1.0",
+  "date": "2026-08-29",
+  "owner": "成员2",
+  "text_samples": [
+    {
+      "id": "text-1",
+      "title": "门户一句话介绍(冒烟标准用例)",
+      "messages": [
+        {"role": "user", "content": "用一句话介绍四川高校AI大模型门户"}
+      ],
+      "use": "开放平台 POST /api/chat/completions 与会话流式对话的首选冒烟输入;SSE 输出可断言含『增量帧 + done/error 帧』"
+    },
+    {
+      "id": "text-2",
+      "title": "多轮上下文(role 覆盖 system/assistant/user)",
+      "messages": [
+        {"role": "system", "content": "你是四川高校AI大模型门户的校园助手,回答简洁。"},
+        {"role": "user", "content": "成都有哪些高校在用这个平台?"},
+        {"role": "assistant", "content": "平台面向全省高校统一接入,具体接入名单以门户公告为准。"},
+        {"role": "user", "content": "那它支持哪些任务类型?"}
+      ],
+      "use": "验证 messages 多轮拼接与 system 角色透传(开放平台 messages 数组逐条转发上游)"
+    },
+    {
+      "id": "text-3",
+      "title": "长文本 + 参数透传(max_tokens/temperature)",
+      "messages": [
+        {"role": "user", "content": "写一段 200 字左右的校园迎新广播稿,主题:AI 大模型门户上线。"}
+      ],
+      "params": {"temperature": 0.7, "max_tokens": 1024},
+      "use": "验证可选参数 max_tokens/temperature 透传 provider,以及较长输出的流式分帧"
+    }
+  ],
+  "image_samples": [
+    {"file": "sample-image-1.png", "size": "64x64", "format": "PNG", "use": "Mock 文生图离线替换图 1(参数 num=1 首图)"},
+    {"file": "sample-image-2.png", "size": "64x64", "format": "PNG", "use": "Mock 文生图离线替换图 2"},
+    {"file": "sample-image-3.png", "size": "64x64", "format": "PNG", "use": "Mock 文生图离线替换图 3"},
+    {"file": "sample-image-4.png", "size": "8x8", "format": "PNG", "use": "Mock 文生图离线替换图 4(极小图,用于边界演示)"}
+  ],
+  "audio_video_fallback": {
+    "audio_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3",
+    "video_url": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+    "说明": "MockProvider 的声音克隆(MOCK_AUDIO_URL)与视频(MOCK_VIDEO_URL)目前返回上述公网样例 URL,断网环境浏览器加载不到。离线演示前先在有网环境下载这两个文件到 backend/uploads/(如 clone-mock.mp3 / flower.mp4),再改 providers/mock.py 的对应常量指向 /static/<文件名>;或直接在管理端把演示模型的 vendor 保持为 mock 并接受联网加载。语音识别(asr)返回固定文本,无需音频文件即可离线演示。"
+  }
+}
