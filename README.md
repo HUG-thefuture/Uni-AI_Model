@@ -3,7 +3,7 @@
 四川高校 AI 大模型门户 · 四人项目组
 
 - 开发周期：2026-08-29 至 2026-09-03（9/4 路演）
-- 技术栈：前端 HTML/CSS/JavaScript/Ajax/jQuery/Layui；后端 Python/FastAPI/SQLAlchemy/MySQL；Linux + 宝塔部署
+- 技术栈：前端 HTML/CSS/JavaScript/Ajax/jQuery/Layui；后端 Python 3.11.9 / FastAPI / SQLAlchemy / MySQL；Linux + 宝塔部署
 - 仓库归属：mac/Uni-AI_Model（私有）
 
 ## 目录规划（建议）
