@@ -222,12 +222,16 @@ body.nav-open {
   }
 
   .toast,
+  .account-menu,
   .typing-dots i {
     animation: none;
   }
 
   .sidebar,
   .skip-link,
+  .user-menu,
+  .user-menu > .layui-icon-down,
+  .account-menu-item,
   .btn-primary,
   .btn-secondary,
   .btn-quiet,
@@ -249,7 +253,8 @@ body.nav-open {
   textarea,
   .panel,
   .status-tag,
-  .demo-badge {
+  .demo-badge,
+  .account-menu {
     forced-color-adjust: auto;
   }
 }

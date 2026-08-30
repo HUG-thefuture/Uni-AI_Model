@@ -1,5 +1,5 @@
 ﻿{
-    "generated_at":  "2026-08-30 23:32:59 +08:00",
+    "generated_at":  "2026-08-30 23:53:50 +08:00",
     "frontend_dir":  "D:\\ClassWk\\class260720\\四川高校ai大模型门户\\Uni-AI_Model\\frontend",
     "base_url":  "http://127.0.0.1:4175",
     "passed":  true,
@@ -32,7 +32,7 @@
                    {
                        "name":  "page_http_access",
                        "passed":  true,
-                       "detail":  "All 8 pages returned 200; slowest 12ms"
+                       "detail":  "All 8 pages returned 200; slowest 13ms"
                    },
                    {
                        "name":  "local_static_assets",
@@ -44,7 +44,7 @@
                   {
                       "page":  "index.html",
                       "status":  200,
-                      "milliseconds":  12
+                      "milliseconds":  13
                   },
                   {
                       "page":  "models.html",
@@ -54,44 +54,44 @@
                   {
                       "page":  "chat.html",
                       "status":  200,
-                      "milliseconds":  9
+                      "milliseconds":  11
                   },
                   {
                       "page":  "image.html",
                       "status":  200,
-                      "milliseconds":  10
+                      "milliseconds":  12
                   },
                   {
                       "page":  "audio.html",
                       "status":  200,
-                      "milliseconds":  9
+                      "milliseconds":  11
                   },
                   {
                       "page":  "video.html",
                       "status":  200,
-                      "milliseconds":  9
+                      "milliseconds":  11
                   },
                   {
                       "page":  "tasks.html",
                       "status":  200,
-                      "milliseconds":  9
+                      "milliseconds":  11
                   },
                   {
                       "page":  "profile.html",
                       "status":  200,
-                      "milliseconds":  10
+                      "milliseconds":  11
                   }
               ],
     "assets":  [
                    {
                        "asset":  "css/app.css",
                        "status":  200,
-                       "bytes":  22829
+                       "bytes":  25252
                    },
                    {
                        "asset":  "css/hardening.css",
                        "status":  200,
-                       "bytes":  3749
+                       "bytes":  3852
                    },
                    {
                        "asset":  "js/api.js",
@@ -101,7 +101,7 @@
                    {
                        "asset":  "js/app.js",
                        "status":  200,
-                       "bytes":  47408
+                       "bytes":  51172
                    },
                    {
                        "asset":  "vendor/jquery/jquery-3.7.1.min.js",

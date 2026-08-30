@@ -200,7 +200,18 @@
           ${window.PortalConfig.demoMode ? '<span class="demo-badge">演示模式</span>' : ''}
           <div class="identity">${icon('layui-icon-vercode')}<span>${escapeHtml(user.realName)}</span></div>
           <div class="wallet">${icon('layui-icon-rmb')}<span>余额 ¥${escapeHtml(user.balance)}</span></div>
-          <button class="user-menu" type="button" data-route="profile" aria-label="打开个人中心"><span class="avatar">${escapeHtml(user.initial)}</span><span>${escapeHtml(user.name)}</span>${icon('layui-icon-down')}</button>
+          <div class="account-menu-wrap">
+            <button class="user-menu" id="account-menu-button" type="button" aria-label="打开账户菜单" aria-haspopup="menu" aria-controls="account-menu-popup" aria-expanded="false"><span class="avatar">${escapeHtml(user.initial)}</span><span>${escapeHtml(user.name)}</span>${icon('layui-icon-down')}</button>
+            <div class="account-menu" id="account-menu-popup" role="menu" aria-labelledby="account-menu-button" hidden>
+              <div class="account-menu-summary" role="presentation"><span class="avatar account-menu-avatar">${escapeHtml(user.initial)}</span><span class="account-menu-copy"><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.school)} · 学生用户</small></span></div>
+              <div class="account-menu-meta" role="presentation"><span>${icon('layui-icon-vercode')} 已认证</span><span>余额 ¥${escapeHtml(user.balance)}</span></div>
+              <div class="account-menu-divider" role="separator"></div>
+              <button class="account-menu-item" type="button" role="menuitem" data-route="profile">${icon('layui-icon-user')}<span>个人中心</span></button>
+              <button class="account-menu-item" type="button" role="menuitem" data-route="tasks">${icon('layui-icon-list')}<span>创作历史</span></button>
+              <div class="account-menu-divider" role="separator"></div>
+              <button class="account-menu-item account-menu-item-disabled" type="button" role="menuitem" aria-disabled="true" disabled title="等待成员1退出登录接口">${icon('layui-icon-logout')}<span>退出登录</span><small>待接口</small></button>
+            </div>
+          </div>
         </div>
       </header>
       <aside class="sidebar" id="primary-sidebar"><nav class="side-nav" aria-label="主导航">${navTemplate(route)}</nav><div class="side-footer">© 2026 四川高校大模型门户<br>课程项目演示版</div></aside>
@@ -388,13 +399,63 @@
       $('body').toggleClass('nav-open', isOpen);
     };
     const closeMobileNav = () => syncMobileNav(false);
+    const accountMenuItems = () => $('#account-menu-popup [role="menuitem"]:not(:disabled)');
+    const syncAccountMenu = (open, focusIndex) => {
+      const isOpen = Boolean(open);
+      const menu = $('#account-menu-popup');
+      $('.account-menu-wrap').toggleClass('open', isOpen);
+      $('.user-menu').attr('aria-expanded', String(isOpen)).attr('aria-label', isOpen ? '关闭账户菜单' : '打开账户菜单');
+      menu.prop('hidden', !isOpen);
+      if (isOpen && typeof focusIndex === 'number') {
+        const items = accountMenuItems();
+        if (items.length) items.eq((focusIndex + items.length) % items.length).trigger('focus');
+      }
+    };
+    const closeAccountMenu = restoreFocus => {
+      const wasOpen = !$('#account-menu-popup').prop('hidden');
+      syncAccountMenu(false);
+      if (restoreFocus && wasOpen) $('.user-menu').trigger('focus');
+    };
     $('.side-link').on('click', closeMobileNav);
-    $('[data-route]').on('click', function (event) { event.preventDefault(); closeMobileNav(); setRoute($(this).data('route')); });
-    $('.mobile-nav-toggle').on('click', () => syncMobileNav(!$('.sidebar').hasClass('open')));
+    $('[data-route]').on('click', function (event) { event.preventDefault(); closeMobileNav(); closeAccountMenu(); setRoute($(this).data('route')); });
+    $('.user-menu').on('click', function (event) {
+      event.stopPropagation();
+      const shouldOpen = $('#account-menu-popup').prop('hidden');
+      closeMobileNav();
+      const detail = event.originalEvent && event.originalEvent.detail;
+      syncAccountMenu(shouldOpen, shouldOpen && detail === 0 ? 0 : undefined);
+    }).on('keydown', function (event) {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      event.preventDefault();
+      closeMobileNav();
+      syncAccountMenu(true, event.key === 'ArrowDown' ? 0 : -1);
+    });
+    $('#account-menu-popup').on('keydown', function (event) {
+      const items = accountMenuItems();
+      const current = items.index(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        syncAccountMenu(true, current + (event.key === 'ArrowDown' ? 1 : -1));
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        syncAccountMenu(true, event.key === 'Home' ? 0 : -1);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAccountMenu(true);
+      } else if (event.key === 'Tab') {
+        closeAccountMenu();
+      }
+    });
+    $(document).off('pointerdown.accountMenu').on('pointerdown.accountMenu', event => { if (!$(event.target).closest('.account-menu-wrap').length) closeAccountMenu(); });
+    $(document).off('keydown.accountMenu').on('keydown.accountMenu', event => { if (event.key === 'Escape' && !$('#account-menu-popup').prop('hidden')) { event.preventDefault(); closeAccountMenu(true); } });
+    $('.mobile-nav-toggle').on('click', () => { closeAccountMenu(); syncMobileNav(!$('.sidebar').hasClass('open')); });
     $('.nav-scrim').on('click', closeMobileNav);
     $(window).off('resize.mobileNav').on('resize.mobileNav', () => syncMobileNav($('.sidebar').hasClass('open')));
-    $(document).off('keydown.mobileNav').on('keydown.mobileNav', event => { if (event.key === 'Escape') { closeMobileNav(); $('.mobile-nav-toggle').trigger('focus'); } });
+    $(window).off('resize.accountMenu').on('resize.accountMenu', () => closeAccountMenu());
+    $(document).off('keydown.mobileNav').on('keydown.mobileNav', event => { if (event.key === 'Escape' && $('.sidebar').hasClass('open')) { closeMobileNav(); $('.mobile-nav-toggle').trigger('focus'); } });
     syncMobileNav(false);
+    syncAccountMenu(false);
     $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; setRoute('text'); } else if (found.type === '生图模型') setRoute('image'); else if (found.type === 'TTS模型') setRoute('audio'); else if (found.type === '生视频模型') setRoute('video'); else toast('该模型的应用入口正在准备中。'); });
     $('[data-source]').on('click', function () { state.modelSource = $(this).data('source'); render(); });
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });
