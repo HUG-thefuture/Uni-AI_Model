@@ -1,4 +1,4 @@
-/* global $, layui */
+/* global $ */
 (function () {
   'use strict';
 
@@ -6,6 +6,10 @@
   window.PortalConfig = Object.assign({ apiBase: '', demoMode: true, loginUrl: '' }, window.PortalConfig || {});
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
+  const routeTitles = {
+    home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
+    audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心'
+  };
 
   const state = {
     route: '',
@@ -62,18 +66,32 @@
     return window.PortalConfig.demoMode && String(value || '').includes('#失败');
   }
 
+  function normalizeText(value, fallback, maxLength) {
+    if (typeof value !== 'string') return fallback;
+    const normalized = value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, maxLength);
+    return normalized || fallback;
+  }
+
   function hydrateDemoState() {
     if (!window.PortalConfig.demoMode) return;
     try {
       const saved = JSON.parse(localStorage.getItem(DEMO_STORAGE_KEY) || 'null');
       if (!saved || typeof saved !== 'object') return;
       ['chatMessages', 'chatHistory', 'imageHistory', 'audioHistory', 'videoHistory', 'tasks'].forEach(key => {
-        if (Array.isArray(saved[key])) state[key] = saved[key].slice(0, 100);
+        if (Array.isArray(saved[key])) state[key] = saved[key].filter(item => item && typeof item === 'object').slice(0, 100);
       });
       ['modelType', 'modelGroup', 'modelSource', 'keyword', 'currentChatModel', 'imageMode', 'imageRatio', 'audioMode', 'selectedVoice', 'videoDuration'].forEach(key => {
-        if (typeof saved[key] === 'string') state[key] = saved[key];
+        if (typeof saved[key] === 'string') state[key] = normalizeText(saved[key], state[key], 100);
       });
-      if (saved.user && typeof saved.user === 'object') user = Object.assign({}, user, saved.user);
+      if (saved.user && typeof saved.user === 'object') {
+        user = {
+          name: normalizeText(saved.user.name, user.name, 30),
+          initial: normalizeText(saved.user.initial, user.initial, 4),
+          balance: normalizeText(saved.user.balance, user.balance, 24),
+          school: normalizeText(saved.user.school, user.school, 50),
+          realName: normalizeText(saved.user.realName, user.realName, 20)
+        };
+      }
     } catch (error) {
       localStorage.removeItem(DEMO_STORAGE_KEY);
     }
@@ -131,6 +149,16 @@
   function escapeHtml(value) {
     return String(value || '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
   }
+  function safeNavigationUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw, location.href);
+      return ['http:', 'https:'].includes(parsed.protocol) ? raw : '';
+    } catch (error) {
+      return '';
+    }
+  }
   function icon(name) { return `<i class="layui-icon ${name}"></i>`; }
   function currentRoute() {
     if (location.hash) return location.hash.replace(/^#\/?/, '').split('?')[0] || 'home';
@@ -148,48 +176,54 @@
     $('body').append(node); setTimeout(() => node.fadeOut(220, () => node.remove()), 2600);
   }
   function statusLabel(status) {
-    const labels = { pending: '待处理', processing: '处理中', succeeded: '已完成', success: '已完成', failed: '失败' };
-    const style = status === 'succeeded' ? 'success' : status;
-    return `<span class="status-tag ${style}">${labels[status] || status}</span>`;
+    const labels = { pending: '待处理', processing: '处理中', succeeded: '已完成', failed: '失败' };
+    const normalized = status === 'success' ? 'succeeded' : status;
+    const label = labels[normalized] || '状态未知';
+    const style = normalized === 'succeeded' ? 'success' : (labels[normalized] ? normalized : 'pending');
+    return `<span class="status-tag ${style}" aria-label="任务状态：${label}">${label}</span>`;
   }
   function pageHead(title, subtitle, action) {
     return `<div class="page-head"><div><h1 class="page-title">${title}</h1><p class="page-subtitle">${subtitle}</p></div>${action || ''}</div>`;
   }
   function navTemplate(route) {
-    return navItems.map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}">${icon(iconName)}<span>${label}</span></a>`).join('');
+    return navItems.map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}"${route === id ? ' aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('');
   }
   function shell(route, content) {
     return `
+      <a class="skip-link" href="#main-content">跳到主要内容</a>
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:10px">
-          <button class="mobile-nav-toggle" type="button" aria-label="打开导航">${icon('layui-icon-spread-left')}</button>
+          <button class="mobile-nav-toggle" type="button" aria-label="打开导航" aria-controls="primary-sidebar" aria-expanded="false">${icon('layui-icon-spread-left')}</button>
           <a class="brand" href="#/home"><span class="brand-mark">${icon('layui-icon-light')}</span><span>四川高校大模型门户</span></a>
         </div>
         <div class="top-actions">
           ${window.PortalConfig.demoMode ? '<span class="demo-badge">演示模式</span>' : ''}
-          <div class="identity">${icon('layui-icon-vercode')}<span>${user.realName}</span></div>
-          <div class="wallet">${icon('layui-icon-rmb')}<span>余额 ¥${user.balance}</span></div>
-          <button class="user-menu" data-route="profile"><span class="avatar">${user.initial}</span><span>${user.name}</span>${icon('layui-icon-down')}</button>
+          <div class="identity">${icon('layui-icon-vercode')}<span>${escapeHtml(user.realName)}</span></div>
+          <div class="wallet">${icon('layui-icon-rmb')}<span>余额 ¥${escapeHtml(user.balance)}</span></div>
+          <button class="user-menu" type="button" data-route="profile" aria-label="打开个人中心"><span class="avatar">${escapeHtml(user.initial)}</span><span>${escapeHtml(user.name)}</span>${icon('layui-icon-down')}</button>
         </div>
       </header>
-      <aside class="sidebar"><nav class="side-nav" aria-label="主导航">${navTemplate(route)}</nav><div class="side-footer">© 2026 四川高校大模型门户<br>课程项目演示版</div></aside>
+      <aside class="sidebar" id="primary-sidebar"><nav class="side-nav" aria-label="主导航">${navTemplate(route)}</nav><div class="side-footer">© 2026 四川高校大模型门户<br>课程项目演示版</div></aside>
       <button class="nav-scrim" type="button" aria-label="关闭导航"></button>
-      <main class="workspace"><div class="page">${content}</div></main>`;
+      <main class="workspace" id="main-content" tabindex="-1"><div class="page">${content}</div></main>`;
   }
 
   function authRequiredView() {
-    const loginAction = window.PortalConfig.loginUrl
-      ? `<a class="btn-primary auth-link" href="${escapeHtml(window.PortalConfig.loginUrl)}">前往登录</a>`
-      : '<p class="state-note">登录入口尚未配置，请联系项目集成人员。</p>';
+    const loginUrl = safeNavigationUrl(window.PortalConfig.loginUrl);
+    const loginAction = loginUrl
+      ? `<a class="btn-primary auth-link" href="${escapeHtml(loginUrl)}">前往登录</a>`
+      : '<p class="state-note">登录入口尚未配置或配置无效，请联系项目集成人员。</p>';
     return `<main class="auth-required"><section class="panel panel-pad"><span class="auth-icon">${icon('layui-icon-password')}</span><h1>请先登录</h1><p>当前页面需要有效登录状态。登录后可继续使用模型和创作任务。</p>${loginAction}</section></main>`;
   }
 
   function modelCard(model) {
-    const initials = model.name.split(/[-.]/).map(item => item[0]).join('').slice(0, 2).toUpperCase();
+    const rawName = String(model.name || '');
+    const initials = rawName.split(/[-.]/).map(item => item[0]).join('').slice(0, 2).toUpperCase();
+    const tone = /^#[0-9a-f]{6}$/i.test(String(model.tone || '')) ? model.tone : '#2f6fe8';
     return `<article class="model-card">
-      <div class="model-card-top"><span class="model-logo" style="background:${model.tone}">${initials}</span><span class="discount">${model.discount}</span></div>
-      <h3 class="model-name">${model.name}</h3><p class="model-desc">${model.desc}</p>
-      <div class="model-meta"><span class="tag">${model.tag}</span><button class="btn-quiet" data-use-model="${model.name}">立即使用</button></div>
+      <div class="model-card-top"><span class="model-logo" style="background:${tone}">${escapeHtml(initials)}</span><span class="discount">${escapeHtml(model.discount)}</span></div>
+      <h3 class="model-name">${escapeHtml(rawName)}</h3><p class="model-desc">${escapeHtml(model.desc)}</p>
+      <div class="model-meta"><span class="tag">${escapeHtml(model.tag)}</span><button class="btn-quiet" type="button" data-use-model="${escapeHtml(rawName)}">立即使用</button></div>
     </article>`;
   }
 
@@ -201,7 +235,7 @@
       ['models', 'layui-icon-app', '私域模型', '查看校内模型能力']
     ].map(([route, iconName, title, desc]) => `<button class="quick-entry" data-route="${route}"><span class="quick-icon">${icon(iconName)}</span><strong>${title}</strong><span>${desc}</span></button>`).join('');
     return `${pageHead('首页', '为四川高校学生准备的一站式多模态 AI 创作空间')}
-      <section class="hero panel"><div class="hero-copy"><p class="hero-overline">AI MULTIMODAL</p><h1>AI 多模态创作工具</h1><p>从一段灵感到可用的文字、图像、声音和视频，在同一个工作区完成模型选择、创作与结果管理。</p><button class="btn-primary" data-route="models">立即体验 ${icon('layui-icon-right')}</button></div></section>
+      <section class="hero panel"><div class="hero-copy"><p class="hero-overline">AI MULTIMODAL</p><h2>AI 多模态创作工具</h2><p>从一段灵感到可用的文字、图像、声音和视频，在同一个工作区完成模型选择、创作与结果管理。</p><button class="btn-primary" data-route="models">立即体验 ${icon('layui-icon-right')}</button></div></section>
       <section style="margin-top:24px"><div class="page-head"><div><h2 class="section-title">${icon('layui-icon-star')}精选模型</h2></div><button class="btn-secondary" data-route="models">进入模型广场</button></div><div class="feature-grid">${feature}</div></section>
       <section style="margin-top:28px"><h2 class="section-title">${icon('layui-icon-template-1')}常用功能入口</h2><div class="quick-grid">${quick}</div></section>`;
   }
@@ -219,20 +253,20 @@
     const groups = ['全部分组', '国产顶级模型', '阿里系列模型', '首推旗舰模型', '私域知识模型'];
     const types = ['全部', '语言模型', '多模态模型', 'TTS模型', '生图模型', '生视频模型', '本地模型'];
     return `${pageHead('模型广场', '探索可用于创作与开发的模型能力，按场景快速筛选。')}
-      <section class="panel panel-pad"><div class="filters" style="margin-bottom:12px"><button class="filter-btn ${state.modelSource === '云端模型' ? 'active' : ''}" data-source="云端模型">云端模型</button><button class="filter-btn ${state.modelSource === '私域模型' ? 'active' : ''}" data-source="私域模型">私域模型</button></div>
-      <div class="filters" style="margin-bottom:12px">${groups.map(item => `<button class="filter-btn ${state.modelGroup === item ? 'active' : ''}" data-group="${item}">${item}</button>`).join('')}</div>
-      <div class="models-toolbar"><div class="filters">${types.map(item => `<button class="filter-btn ${state.modelType === item ? 'active' : ''}" data-type="${item}">${item}</button>`).join('')}</div><label class="search-field">${icon('layui-icon-search')}<input class="field" id="model-search" value="${escapeHtml(state.keyword)}" placeholder="搜索模型名称" /></label></div>
+      <section class="panel panel-pad"><div class="filters" style="margin-bottom:12px"><button type="button" class="filter-btn ${state.modelSource === '云端模型' ? 'active' : ''}" data-source="云端模型" aria-pressed="${state.modelSource === '云端模型'}">云端模型</button><button type="button" class="filter-btn ${state.modelSource === '私域模型' ? 'active' : ''}" data-source="私域模型" aria-pressed="${state.modelSource === '私域模型'}">私域模型</button></div>
+      <div class="filters" style="margin-bottom:12px">${groups.map(item => `<button type="button" class="filter-btn ${state.modelGroup === item ? 'active' : ''}" data-group="${item}" aria-pressed="${state.modelGroup === item}">${item}</button>`).join('')}</div>
+      <div class="models-toolbar"><div class="filters">${types.map(item => `<button type="button" class="filter-btn ${state.modelType === item ? 'active' : ''}" data-type="${item}" aria-pressed="${state.modelType === item}">${item}</button>`).join('')}</div><label class="search-field">${icon('layui-icon-search')}<input class="field" id="model-search" value="${escapeHtml(state.keyword)}" placeholder="搜索模型名称" aria-label="搜索模型名称" /></label></div>
       <div class="models-grid" aria-live="polite">${modelResultsHtml()}</div></section>`;
   }
 
   function textView() {
     const chatModels = models.filter(item => item.type === '语言模型' || item.type === '本地模型');
-    const messages = state.chatMessages.map(item => `<div class="message ${item.role === 'user' ? 'user' : ''}"><span class="message-avatar">${item.role === 'user' ? user.initial : 'AI'}</span><div class="bubble">${item.loading ? '<span class="typing-dots"><i></i><i></i><i></i></span>' : escapeHtml(item.content)}</div></div>`).join('');
+    const messages = state.chatMessages.map(item => `<div class="message ${item.role === 'user' ? 'user' : ''}"><span class="message-avatar">${item.role === 'user' ? escapeHtml(user.initial) : 'AI'}</span><div class="bubble">${item.loading ? '<span class="typing-dots"><i></i><i></i><i></i></span>' : escapeHtml(item.content)}</div></div>`).join('');
     return `${pageHead('文本交互舱', '选择模型，开始一次专注的对话与创作。')}
       <section class="panel chat-layout">
-        <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${model.name}">${model.name}<small>${model.tag}</small></button>`).join('')}</div></aside>
-        <div class="chat-main"><div class="chat-toolbar"><div><strong>${state.currentChatModel}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…"></textarea><div class="compose-foot"><div class="chip-row"><button class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
-        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<button class="history-row">${escapeHtml(item.title)}<small>${item.date}</small></button>`).join('')}</div></aside>
+        <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button type="button" class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${escapeHtml(model.name)}" aria-pressed="${state.currentChatModel === model.name}">${escapeHtml(model.name)}<small>${escapeHtml(model.tag)}</small></button>`).join('')}</div></aside>
+        <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…" aria-label="对话内容，按 Ctrl 加 Enter 发送"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
+        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('')}</div></aside>
       </section>`;
   }
 
@@ -241,8 +275,8 @@
     return history.map(item => {
       const error = item.error ? `<small class="task-error">${escapeHtml(item.error)}</small>` : '';
       const action = item.status === 'failed'
-        ? `<button type="button" class="btn-quiet" data-retry="${item.id}">重新提交</button>`
-        : `<button type="button" class="btn-quiet" data-view-task="${item.id}">查看</button>`;
+        ? `<button type="button" class="btn-quiet" data-retry="${escapeHtml(item.id)}">重新提交</button>`
+        : `<button type="button" class="btn-quiet" data-view-task="${escapeHtml(item.id)}">查看</button>`;
       return `<tr><td><span class="task-title">${escapeHtml(item.title)}</span>${error}</td><td>${escapeHtml(item.mode)}</td><td>${escapeHtml(item.meta)}</td><td>${escapeHtml(item.createdAt)}</td><td>${statusLabel(item.status)}</td><td>${action}</td></tr>`;
     }).join('');
   }
@@ -250,9 +284,9 @@
   function imageView() {
     const hasResult = state.imageHistory[0] && ['succeeded', 'success'].includes(state.imageHistory[0].status);
     return `${pageHead('图像生成室', '选择模型并输入描述词，把灵感转成可用的视觉素材。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-picture')}图像预览</h2></div><div class="preview-art ${hasResult ? 'demo-image' : ''}"><div class="preview-art-inner">${icon(hasResult ? 'layui-icon-picture' : 'layui-icon-upload-drag')}<strong>${hasResult ? '演示生成结果' : '等待生成图像'}</strong><span>${hasResult ? '接入真实图像接口后将显示服务端返回的图片。' : '提交提示词后，生成结果会在这里展示。'}</span></div></div><div class="preview-caption">${hasResult ? state.imageHistory[0].title : '尚未提交任务'}</div></div>
-        <form class="panel panel-pad" id="image-form"><div class="inline-model"><span>${icon('layui-icon-light')} qwen-image <small>文生图 / 图生图</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row"><button type="button" class="tab-btn ${state.imageMode === '文生图' ? 'active' : ''}" data-image-mode="文生图">文生图</button><button type="button" class="tab-btn" disabled aria-disabled="true" title="文件字段确认后开放">图生图 · 待开放</button></div><div class="form-block"><label class="field-label">输入描述词 <span class="required">*</span></label><textarea class="textarea-field" id="image-prompt" required placeholder="例如：一只可爱的橘猫在阳光下睡觉，写实风格，8K 分辨率…"></textarea></div><div class="form-block"><label class="field-label">图像尺寸</label><div class="ratio-row">${['1:1 1024×1024', '9:16 720×1280', '16:9 1280×720'].map(item => `<button type="button" class="duration-btn ${state.imageRatio === item ? 'active' : ''}" data-ratio="${item}">${item}</button>`).join('')}</div></div><div class="advanced"><div class="form-grid"><div><label class="field-label">生成数量</label><select class="select-field" id="image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></div><div><label class="field-label">负面提示词</label><input id="image-negative" class="field" placeholder="模糊、低质量、变形…" /></div></div></div><button class="btn-primary wide-action" id="image-submit" type="submit" ${state.busy.image ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.image ? '正在提交…' : '立即生成'}</button><p class="state-note">${icon('layui-icon-tips')} 演示记录会保存在本机；提示词包含“#失败”可验证失败与重试。</p></form></section>
-      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}生成历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>提示词</th><th>类型</th><th>尺寸</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${historyRows(state.imageHistory, '生成')}</tbody></table></div></section>`;
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-picture')}图像预览</h2></div><div class="preview-art ${hasResult ? 'demo-image' : ''}"><div class="preview-art-inner">${icon(hasResult ? 'layui-icon-picture' : 'layui-icon-upload-drag')}<strong>${hasResult ? '演示生成结果' : '等待生成图像'}</strong><span>${hasResult ? '接入真实图像接口后将显示服务端返回的图片。' : '提交提示词后，生成结果会在这里展示。'}</span></div></div><div class="preview-caption">${hasResult ? escapeHtml(state.imageHistory[0].title) : '尚未提交任务'}</div></div>
+        <form class="panel panel-pad" id="image-form"><div class="inline-model"><span>${icon('layui-icon-light')} qwen-image <small>文生图 / 图生图</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="图像生成模式"><button type="button" class="tab-btn ${state.imageMode === '文生图' ? 'active' : ''}" data-image-mode="文生图" aria-pressed="${state.imageMode === '文生图'}">文生图</button><button type="button" class="tab-btn" disabled aria-disabled="true" title="文件字段确认后开放">图生图 · 待开放</button></div><div class="form-block"><label class="field-label" for="image-prompt">输入描述词 <span class="required">*</span></label><textarea class="textarea-field" id="image-prompt" required placeholder="例如：一只可爱的橘猫在阳光下睡觉，写实风格，8K 分辨率…"></textarea></div><div class="form-block"><span class="field-label" id="image-ratio-label">图像尺寸</span><div class="ratio-row" role="group" aria-labelledby="image-ratio-label">${['1:1 1024×1024', '9:16 720×1280', '16:9 1280×720'].map(item => `<button type="button" class="duration-btn ${state.imageRatio === item ? 'active' : ''}" data-ratio="${item}" aria-pressed="${state.imageRatio === item}">${item}</button>`).join('')}</div></div><div class="advanced"><div class="form-grid"><div><label class="field-label" for="image-count">生成数量</label><select class="select-field" id="image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></div><div><label class="field-label" for="image-negative">负面提示词</label><input id="image-negative" class="field" placeholder="模糊、低质量、变形…" /></div></div></div><button class="btn-primary wide-action" id="image-submit" type="submit" ${state.busy.image ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.image ? '正在提交…' : '立即生成'}</button><p class="state-note">${icon('layui-icon-tips')} 演示记录会保存在本机；提示词包含“#失败”可验证失败与重试。</p></form></section>
+      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}生成历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">提示词</th><th scope="col">类型</th><th scope="col">尺寸</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.imageHistory, '生成')}</tbody></table></div></section>`;
   }
 
   function audioView() {
@@ -261,8 +295,8 @@
     const voices = [['龙安洋', '阳光大男孩 · 中英双语'], ['龙安欢', '欢脱元气女 · 中英双语'], ['清雅老师', '知性女声 · 普通话'], ['星河少年', '沉稳男声 · 普通话']];
     return `${pageHead('声音创作坊', '将文字转成自然语音，并保留每一次创作的任务记录。')}
       <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${complete ? '演示任务已完成；真实音频接入后可播放。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? `<div class="audio-player"><button class="player-button" type="button" disabled title="真实音频地址接入后可播放">${icon('layui-icon-play')}</button><div class="wave">${Array.from({length:42}, () => '<i></i>').join('')}</div><span>00:18</span></div>` : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
-        <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} cosyvoice-v3-plus <small>¥1.2 / 万字符</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" ${item === '声音合成' ? `data-audio-mode="${item}"` : 'disabled aria-disabled="true" title="接口字段确认后开放"'}>${item}${item === '声音合成' ? '' : ' · 待开放'}</button>`).join('')}</div><div class="form-block"><label class="field-label">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label">语速</label><input class="field" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label">音频格式</label><select class="select-field"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><label class="field-label">选择配音员</label><div class="audio-voice-grid">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div><button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : '生成音频'}</button><p class="state-note">${icon('layui-icon-tips')} 文本包含“#失败”可验证失败任务和重新提交。</p></form></section>
-      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>作品名称</th><th>模式</th><th>时长/字数</th><th>完成时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${historyRows(state.audioHistory, '创作')}</tbody></table></div></section>`;
+        <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} cosyvoice-v3-plus <small>¥1.2 / 万字符</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="声音创作模式">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" aria-pressed="${state.audioMode === item}" ${item === '声音合成' ? `data-audio-mode="${item}"` : 'disabled aria-disabled="true" title="接口字段确认后开放"'}>${item}${item === '声音合成' ? '' : ' · 待开放'}</button>`).join('')}</div><div class="form-block"><label class="field-label" for="audio-text">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" aria-describedby="audio-count" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count" aria-live="polite">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label" for="audio-speed">语速</label><input class="field" id="audio-speed" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label" for="audio-format">音频格式</label><select class="select-field" id="audio-format"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><span class="field-label" id="voice-label">选择配音员</span><div class="audio-voice-grid" role="group" aria-labelledby="voice-label">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}" aria-pressed="${state.selectedVoice === name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div><button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : '生成音频'}</button><p class="state-note">${icon('layui-icon-tips')} 文本包含“#失败”可验证失败任务和重新提交。</p></form></section>
+      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">模式</th><th scope="col">时长/字数</th><th scope="col">完成时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.audioHistory, '创作')}</tbody></table></div></section>`;
   }
 
   function videoView() {
@@ -270,21 +304,21 @@
     const running = current && ['pending', 'processing'].includes(current.status);
     const complete = current && ['succeeded', 'success'].includes(current.status);
     return `${pageHead('视频合成站', '以文本、图片或音频条件组合成一段可控的短视频。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview"><div class="preview-art-inner">${icon(complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${complete ? '演示模式下可展示预生成素材；正式接口会返回视频地址。' : '生成完成后将在此显示结果。'}</span></div></div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? current.title : '无首帧时将采用文生视频模型。'}</div></div>
-        <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} wanx2.1-vace-plus <small>视频生成</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="form-block"><label class="field-label">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><label class="field-label">视频时长</label><div class="duration-row">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label">分辨率</label><select class="select-field"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><label class="field-label">音频设置</label><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : '文生视频'}</button><p class="state-note">${icon('layui-icon-tips')} 提示词包含“#失败”可验证失败任务和重新提交。</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
-      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap"><table class="data-table"><thead><tr><th>作品名称</th><th>合成模式</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${historyRows(state.videoHistory, '创作')}</tbody></table></div></section>`;
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview"><div class="preview-art-inner">${icon(complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${complete ? '演示模式下可展示预生成素材；正式接口会返回视频地址。' : '生成完成后将在此显示结果。'}</span></div></div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? escapeHtml(current.title) : '无首帧时将采用文生视频模型。'}</div></div>
+        <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} wanx2.1-vace-plus <small>视频生成</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="form-block"><label class="field-label" for="video-prompt">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label" for="video-negative">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><span class="field-label" id="video-duration-label">视频时长</span><div class="duration-row" role="group" aria-labelledby="video-duration-label">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}" aria-pressed="${state.videoDuration === item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label" for="video-resolution">分辨率</label><select class="select-field" id="video-resolution"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><span class="field-label">音频设置</span><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : '文生视频'}</button><p class="state-note">${icon('layui-icon-tips')} 提示词包含“#失败”可验证失败任务和重新提交。</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
+      <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">合成模式</th><th scope="col">时长</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.videoHistory, '创作')}</tbody></table></div></section>`;
   }
 
   function tasksView() {
     const all = [...state.videoHistory, ...state.audioHistory, ...state.imageHistory].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const action = window.PortalConfig.demoMode && all.length ? '<button type="button" class="btn-secondary" id="clear-demo-history">清空演示记录</button>' : '';
     return `${pageHead('创作历史', '集中查看你提交过的图像、声音和视频任务。', action)}
-      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-tips')}<div>这里只展示当前登录用户的任务。任务失败时可以重新提交；正式系统会由后端保证失败任务不扣费。</div></div><div class="table-wrap" style="margin-top:18px"><table class="data-table"><thead><tr><th>任务名称</th><th>类型</th><th>参数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${historyRows(all, '任务')}</tbody></table></div></section>`;
+      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-tips')}<div>这里只展示当前登录用户的任务。任务失败时可以重新提交；正式系统会由后端保证失败任务不扣费。</div></div><div class="table-wrap" style="margin-top:18px" role="region" aria-label="全部创作任务表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">类型</th><th scope="col">参数</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(all, '任务')}</tbody></table></div></section>`;
   }
 
   function profileView() {
     return `${pageHead('个人中心', '查看实名认证状态、账户概况和个人资料。')}
-      <section class="profile-grid"><article class="panel panel-pad profile-card"><div class="profile-avatar">${user.initial}</div><h2 class="profile-name">${user.name}</h2><p>${user.school} · 学生用户</p><span class="status-tag success">${icon('layui-icon-vercode')} 已完成实名认证</span><div class="metric-row"><div class="metric"><strong>¥${user.balance}</strong><span>账户余额</span></div><div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div><div class="metric"><strong>3</strong><span>可用模型</span></div></div></article><section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label">昵称</label><input class="field" id="profile-name" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label">学校</label><input class="field" id="profile-school" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label">实名认证状态</label><input class="field" value="已完成认证" disabled /></div><div class="form-block"><label class="field-label">账号角色</label><input class="field" value="普通用户" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包、账单、充值和发票将由成员4模块提供真实数据接口。当前页面仅展示成员3负责的统一门户入口。</div></div></section></section>`;
+      <section class="profile-grid"><article class="panel panel-pad profile-card"><div class="profile-avatar">${escapeHtml(user.initial)}</div><h2 class="profile-name">${escapeHtml(user.name)}</h2><p>${escapeHtml(user.school)} · 学生用户</p><span class="status-tag success">${icon('layui-icon-vercode')} 已完成实名认证</span><div class="metric-row"><div class="metric"><strong>¥${escapeHtml(user.balance)}</strong><span>账户余额</span></div><div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div><div class="metric"><strong>3</strong><span>可用模型</span></div></div></article><section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="已完成认证" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="普通用户" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包、账单、充值和发票将由成员4模块提供真实数据接口。当前页面仅展示成员3负责的统一门户入口。</div></div></section></section>`;
   }
 
   function viewFor(route) {
@@ -292,11 +326,12 @@
     return (views[route] || homeView)();
   }
   function render() {
+    state.route = currentRoute();
+    document.title = `${routeTitles[state.route] || routeTitles.home} - 四川高校大模型门户`;
     if (window.PortalApi && !window.PortalApi.ensureAuthenticated()) {
       $('#app').html(authRequiredView());
       return;
     }
-    state.route = currentRoute();
     $('#app').html(shell(state.route, viewFor(state.route)));
     bindEvents();
     if (state.route === 'text') $('#message-list').scrollTop($('#message-list')[0].scrollHeight);
@@ -342,12 +377,24 @@
     });
   }
   function bindEvents() {
-    const closeMobileNav = () => $('.sidebar, .nav-scrim').removeClass('open');
+    const mobileQuery = window.matchMedia('(max-width: 900px)');
+    const syncMobileNav = open => {
+      const isOpen = Boolean(open && mobileQuery.matches);
+      const sidebar = $('.sidebar');
+      sidebar.toggleClass('open', isOpen).attr('aria-hidden', mobileQuery.matches && !isOpen ? 'true' : 'false');
+      if (sidebar[0]) sidebar[0].inert = Boolean(mobileQuery.matches && !isOpen);
+      $('.nav-scrim').toggleClass('open', isOpen).attr('aria-hidden', isOpen ? 'false' : 'true');
+      $('.mobile-nav-toggle').attr('aria-expanded', String(isOpen)).attr('aria-label', isOpen ? '关闭导航' : '打开导航');
+      $('body').toggleClass('nav-open', isOpen);
+    };
+    const closeMobileNav = () => syncMobileNav(false);
     $('.side-link').on('click', closeMobileNav);
     $('[data-route]').on('click', function (event) { event.preventDefault(); closeMobileNav(); setRoute($(this).data('route')); });
-    $('.mobile-nav-toggle').on('click', () => { $('.sidebar, .nav-scrim').toggleClass('open'); });
+    $('.mobile-nav-toggle').on('click', () => syncMobileNav(!$('.sidebar').hasClass('open')));
     $('.nav-scrim').on('click', closeMobileNav);
-    $(document).off('keydown.mobileNav').on('keydown.mobileNav', event => { if (event.key === 'Escape') closeMobileNav(); });
+    $(window).off('resize.mobileNav').on('resize.mobileNav', () => syncMobileNav($('.sidebar').hasClass('open')));
+    $(document).off('keydown.mobileNav').on('keydown.mobileNav', event => { if (event.key === 'Escape') { closeMobileNav(); $('.mobile-nav-toggle').trigger('focus'); } });
+    syncMobileNav(false);
     $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; setRoute('text'); } else if (found.type === '生图模型') setRoute('image'); else if (found.type === 'TTS模型') setRoute('audio'); else if (found.type === '生视频模型') setRoute('video'); else toast('该模型的应用入口正在准备中。'); });
     $('[data-source]').on('click', function () { state.modelSource = $(this).data('source'); render(); });
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });
@@ -367,9 +414,15 @@
     $('[data-video-duration]').on('click', function () { state.videoDuration = $(this).data('video-duration'); render(); });
     $('#video-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#video-prompt').val().trim(); if (!prompt) return toast('请先描述要生成的视频内容。', 'error'); if (state.busy.video) return; state.busy.video = true; createRecord('video', { title: prompt.slice(0, 20) + (prompt.length > 20 ? '…' : ''), mode: '文生视频', meta: state.videoDuration, shouldFail: shouldSimulateFailure(prompt) }); state.busy.video = false; toast('视频任务已提交，渲染可能需要几分钟。', 'success'); render(); });
     $('[data-retry]').on('click', function () { const id = String($(this).data('retry')); let record; ['imageHistory', 'audioHistory', 'videoHistory'].some(key => { record = state[key].find(item => String(item.id) === id); return Boolean(record); }); if (!record) return toast('没有找到需要重试的任务。', 'error'); record.status = 'pending'; record.error = ''; record.shouldFail = false; record.attempts = (record.attempts || 1) + 1; const mirror = state.tasks.find(item => String(item.id) === id); if (mirror) Object.assign(mirror, record); persistDemoState(); scheduleDemoTask(record, true); toast('任务已重新提交，本次演示将正常完成。', 'success'); render(); });
-    $('[data-view-task]').on('click', () => toast('该任务已在当前页面显示最新状态。'));
-    $('#clear-demo-history').on('click', function () { state.imageHistory = []; state.audioHistory = []; state.videoHistory = []; state.tasks = []; taskTimers.forEach(timers => timers.forEach(timer => clearTimeout(timer))); taskTimers.clear(); persistDemoState(); toast('演示任务记录已清空。', 'success'); render(); });
-    $('#profile-form').on('submit', function (event) { event.preventDefault(); const name = $('#profile-name').val().trim(); const school = $('#profile-school').val().trim(); if (!name || !school) return toast('昵称和学校不能为空。', 'error'); state.busy.profile = true; user.name = name; user.initial = Array.from(name)[0].toUpperCase(); user.school = school; state.busy.profile = false; persistDemoState(); toast('个人资料已保存到本机演示数据。', 'success'); render(); });
+    $('[data-view-task]').on('click', function () {
+      const id = String($(this).data('view-task'));
+      const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id);
+      if (!record) return toast('没有找到该任务，可能已被清理。', 'error');
+      if (state.route === record.kind) return toast('当前页面已经显示该任务的最新状态。');
+      setRoute(record.kind);
+    });
+    $('#clear-demo-history').on('click', function () { if (!window.confirm('确定清空全部演示任务记录吗？此操作无法撤销。')) return; state.imageHistory = []; state.audioHistory = []; state.videoHistory = []; state.tasks = []; taskTimers.forEach(timers => timers.forEach(timer => clearTimeout(timer))); taskTimers.clear(); persistDemoState(); toast('演示任务记录已清空。', 'success'); render(); });
+    $('#profile-form').on('submit', function (event) { event.preventDefault(); const name = $('#profile-name').val().trim(); const school = $('#profile-school').val().trim(); if (!name || !school) return toast('昵称和学校不能为空。', 'error'); state.busy.profile = true; user.name = normalizeText(name, user.name, 30); user.initial = Array.from(user.name)[0].toUpperCase(); user.school = normalizeText(school, user.school, 50); state.busy.profile = false; persistDemoState(); toast('个人资料已保存到本机演示数据。', 'success'); render(); });
   }
 
   window.addEventListener('portal:unauthorized', event => {

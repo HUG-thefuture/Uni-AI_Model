@@ -1,6 +1,6 @@
 # frontend（成员3：Layui 前端）
 
-技术栈：HTML / CSS / JavaScript / Ajax / jQuery / Layui。
+技术栈：HTML / CSS / JavaScript / Ajax / jQuery / Layui CSS 与图标字体。页面没有加载未使用的 Layui JavaScript。
 
 ## 页面
 
@@ -41,6 +41,17 @@ python -m http.server 4174 --bind 127.0.0.1 --directory frontend
 
 图生图、声音克隆、语音识别、长文本转音频和视频音频上传尚未冻结接口字段，相关控件已标记为“待开放”并禁用，避免出现看似可用但实际无功能的入口。
 
+## 2026-08-30 前端加固
+
+- 为表单补齐可见标签，为筛选、导航、任务表格和移动端菜单补齐 ARIA 状态；
+- 移动端侧栏关闭时同步 `inert` 与 `aria-hidden`，支持 Escape 关闭并把焦点还给菜单按钮；
+- 390px 下常用按钮和表单控件最小触控高度为 44px；
+- 用户资料、任务标题、模型名称和状态文案在写入页面前统一规范化或转义，登录跳转仅允许 HTTP(S) 地址；
+- “查看任务”可进入对应创作页，清空历史前二次确认，移除没有行为的历史按钮；
+- 调整次要文字与状态文字对比度，提供减少动态效果和无 JavaScript 提示；
+- 每个页面只保留一个一级标题，并根据当前页面更新浏览器标题；
+- 删除未使用的 Layui JavaScript 请求，继续保留本地 Layui CSS 与图标字体。
+
 ## 接口对接
 
 `js/api.js`已实现以下确定内容：
@@ -69,7 +80,15 @@ node --check frontend/js/api.js
 node --check frontend/js/app.js
 ```
 
-已验证内容：八个入口返回200、本地静态依赖返回200、模型搜索保持输入焦点、失败任务可重试、任务和资料刷新后保留、390px移动端无横向溢出、移动端侧栏自动收起、浏览器控制台无错误或警告。
+完整静态自检：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File frontend/check_frontend.ps1 -FrontendDir frontend -ReportPath "交付记录/day2—交付/成员3-前端加固证据/自检结果.json"
+```
+
+已验证内容：八个入口返回 200、本地静态依赖返回 200、模型搜索保持输入焦点、失败任务可重试、任务和资料刷新后保留、390px 移动端无横向溢出、移动端侧栏自动收起、菜单键盘操作正常、表单均有标签、任务“查看”可路由、用户输入按文本展示、浏览器控制台无错误或警告。
+
+Chrome 桌面端和 390px 移动视口证据保存在 `交付记录/day2—交付/成员3-前端加固证据/`。Firefox、Safari、屏幕阅读器、200% 缩放和真实后端联调尚未验证，不能从本地静态验收结果外推。
 
 ## 协作边界
 

@@ -145,6 +145,15 @@ button:disabled,
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+body.nav-open {
+  overflow: hidden;
+}
+
+.table-wrap:focus-visible {
+  outline: 3px solid rgba(47, 111, 232, .38);
+  outline-offset: 3px;
+}
+
 @media (max-width: 1180px) {
   .quick-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -170,7 +179,29 @@ button:disabled,
   .field,
   .select-field,
   .textarea-field {
+    min-height: 44px;
     font-size: 16px;
+  }
+
+  .mobile-nav-toggle,
+  .user-menu,
+  .brand,
+  .side-link,
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .tab-btn,
+  .filter-btn,
+  .duration-btn,
+  .voice-card,
+  .prompt-chip {
+    min-height: 44px;
+  }
+
+  .mobile-nav-toggle,
+  .user-menu {
+    min-width: 44px;
+    justify-content: center;
   }
 
   .demo-badge {
@@ -186,13 +217,27 @@ button:disabled,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  .toast,
+  .typing-dots i {
+    animation: none;
+  }
+
+  .sidebar,
+  .skip-link,
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .tab-btn,
+  .filter-btn,
+  .duration-btn,
+  .voice-card,
+  .quick-entry,
+  .model-card {
+    transition: none;
   }
 }
 
