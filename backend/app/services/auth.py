@@ -1,11 +1,12 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.schemas.auth import Register_req
+from app.schemas.auth import Register_req, Login_req
 from app.models.user import User, UserProfile, Wallet
 from app.core.response import APIError
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password, create_access_token
 
 
+#注册
 async def register(db: AsyncSession, payload: Register_req) -> User:
     exists = await db.scalar(select(User.id).where(User.username == payload.username))
     if exists is not None:
@@ -34,6 +35,16 @@ async def register(db: AsyncSession, payload: Register_req) -> User:
     return user
 
 
+#登录
+async def login(db: AsyncSession, payload: Login_req) -> tuple[str, User]:
+    """登录:查用户 → 验密码 → 校验禁用 → 签发 token。"""
+    user = await db.scalar(select(User).where(User.username == payload.username))
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise APIError(401, "用户名或密码错误")
+    if user.status != 1:
+        raise APIError(403, "账号已被禁用")
+    token = create_access_token(user.id, user.role)
+    return token, user
 
 
 

@@ -19,3 +19,9 @@ class User_out(BaseModel):
         school: str | None = None
         created_at: datetime
         model_config = {"from_attributes": True}
+
+
+class Login_req(BaseModel):
+    """登录请求。"""
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=64)

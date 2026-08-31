@@ -7,14 +7,17 @@
 - 本期使用逻辑外键,不建物理外键,归属校验在应用层完成。
 """
 from collections.abc import AsyncGenerator, Generator
-
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
-
+from app.core.response import APIError
+from app.core.security import decode_token
+from app.models.user import User
 
 class Base(DeclarativeBase):
     pass
@@ -83,3 +86,30 @@ def init_db() -> None:
     from app.models import ai_call_log, ai_task, model, user  # noqa: F401 注册映射
 
     Base.metadata.create_all(bind=engine)
+
+
+#获取解析 token → 查用户 → 校验未禁用
+bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
+async def get_current_user(
+credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_async_db),
+) -> User:
+    if credentials is None:
+        raise APIError(401,"未登录或凭证无效")
+    try:
+        head = decode_token(credentials.credentials)
+        user_id = int(head["sub"])
+    except Exception:
+        raise APIError(401, "登录凭证无效或已过期") from None
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise APIError(401, "未登录或凭证失效")
+    if user.status != 1:
+        raise APIError(403, "账号已被禁用")
+    return user
+
+
+
+
+
