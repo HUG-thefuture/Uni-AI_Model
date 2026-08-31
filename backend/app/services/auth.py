@@ -1,9 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from backend.app.schemas.auth import Register_req
-from backend.app.models.user import User
-from backend.app.core.response import APIError
-from backend.app.core.security import hash_password
+from app.schemas.auth import Register_req
+from app.models.user import User
+from app.core.response import APIError
+from app.core.security import hash_password
 
 
 
