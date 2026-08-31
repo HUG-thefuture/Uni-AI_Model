@@ -7,6 +7,7 @@
 import logging
 import sys
 
+import uvicorn
 from fastapi import FastAPI
 
 from app.core.config import get_settings
@@ -39,3 +40,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+# 测试
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="127.0.0.1", port=8000)
