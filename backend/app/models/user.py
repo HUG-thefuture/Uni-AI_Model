@@ -1,7 +1,13 @@
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint
+from fastapi import  Depends
+from app.core.response import APIError
+from app.core.security import decode_token
 from app.models.base import TimestampMixin, pk_column
-from app.core.db import Base
+from app.core.db import Base, get_async_db
+from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 
 class User(TimestampMixin, Base):
     """用户主表:登录身份、角色、启用状态。"""
@@ -72,3 +78,24 @@ class Wallet(TimestampMixin, Base):
         Integer, nullable=False, default=0, server_default="0", comment="乐观锁版本号"
     )
 
+
+
+bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
+async def get_current_user(
+credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_async_db),
+) -> User:
+    if credentials is None:
+        raise APIError(401,"未登录或凭证无效")
+    try:
+        head = decode_token(credentials.credentials)
+        user_id = int(head["sub"])
+    except Exception:
+        raise APIError(401, "登录凭证无效或已过期") from None
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise APIError(401, "未登录或凭证失效")
+    if user.status != 1:
+        raise APIError(403, "账号已被禁用")
+    return user

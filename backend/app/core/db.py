@@ -17,7 +17,7 @@ from sqlalchemy.pool import NullPool
 from app.core.config import get_settings
 from app.core.response import APIError
 from app.core.security import decode_token
-from app.models.user import User
+# from app.models.user import User
 
 class Base(DeclarativeBase):
     pass
@@ -89,25 +89,25 @@ def init_db() -> None:
 
 
 #获取解析 token → 查用户 → 校验未禁用
-bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
-async def get_current_user(
-credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_async_db),
-) -> User:
-    if credentials is None:
-        raise APIError(401,"未登录或凭证无效")
-    try:
-        head = decode_token(credentials.credentials)
-        user_id = int(head["sub"])
-    except Exception:
-        raise APIError(401, "登录凭证无效或已过期") from None
-
-    user = await db.get(User, user_id)
-    if user is None:
-        raise APIError(401, "未登录或凭证失效")
-    if user.status != 1:
-        raise APIError(403, "账号已被禁用")
-    return user
+# bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
+# async def get_current_user(
+# credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+#     db: AsyncSession = Depends(get_async_db),
+# ) -> User:
+#     if credentials is None:
+#         raise APIError(401,"未登录或凭证无效")
+#     try:
+#         head = decode_token(credentials.credentials)
+#         user_id = int(head["sub"])
+#     except Exception:
+#         raise APIError(401, "登录凭证无效或已过期") from None
+#
+#     user = await db.get(User, user_id)
+#     if user is None:
+#         raise APIError(401, "未登录或凭证失效")
+#     if user.status != 1:
+#         raise APIError(403, "账号已被禁用")
+#     return user
 
 
 
