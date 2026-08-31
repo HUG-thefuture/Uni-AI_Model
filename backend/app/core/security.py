@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 _PBKDF2_ITERATIONS = 100_000
 _ALGO = "HS256"

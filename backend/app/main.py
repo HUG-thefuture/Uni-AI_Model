@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
+from app.routers import auth
 
 
 def create_app() -> FastAPI:
@@ -30,6 +31,9 @@ def create_app() -> FastAPI:
     async def health():
         """存活探针:供 Nginx/Supervisor 与每日集成验收使用。"""
         return ok(data={"status": "up", "service": "ai-portal-backend"})
+
+    # 注册接口:POST /api/auth/register
+    app.include_router(auth.router, prefix=settings.api_prefix)
 
     return app
 
