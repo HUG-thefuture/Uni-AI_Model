@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from services import wallet
-from core.db import get_db
-from schemas.wallet import RechargeRequest
+from ..services import wallet
+from ..core.db import get_async_db, get_current_user
+from ..schemas.wallet import RechargeRequest
 
 router = APIRouter(
     prefix="/api/wallet",
@@ -10,13 +10,13 @@ router = APIRouter(
 )
 
 @router.get("/me")
-async def my_wallet(db:AsyncSession=Depends(get_db),current_user=Depends(get_current_user)):
+async def my_wallet(db:AsyncSession=Depends(get_async_db),current_user=Depends(get_current_user)):
     stmt=await wallet.get_wallet(current_user.id,db)
     return stmt
 
 
 @router.post("/recharge")
-async def recharge(recharge_data:RechargeRequest,db:AsyncSession=Depends(get_db),current_user=Depends(get_current_user)):
+async def recharge(recharge_data:RechargeRequest,db:AsyncSession=Depends(get_async_db),current_user=Depends(get_current_user)):
     if recharge_data.amount <= 0:
         raise HTTPException(status_code=400, detail="充值金额必须大于0")
     try:
@@ -27,5 +27,5 @@ async def recharge(recharge_data:RechargeRequest,db:AsyncSession=Depends(get_db)
 
 
 @router.get("/records")
-async def get_records(db:AsyncSession=Depends(get_db),current_user=Depends(get_current_user)):
+async def get_records(db:AsyncSession=Depends(get_async_db),current_user=Depends(get_current_user)):
     return

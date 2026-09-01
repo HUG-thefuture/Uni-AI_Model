@@ -13,14 +13,14 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from app.core.config import get_settings
-from app.core.db import SessionLocal, run_db
-from app.models.ai_call_log import AiCallLog
-from app.models.ai_task import AiTask
-from app.models.model import Model
-from app.providers.exceptions import ProviderError
-from app.providers.factory import get_provider
-from app.services import billing
+from ..core.config import get_settings
+from ..core.db import SessionLocal, run_db
+from ..models.ai_call_log import AiCallLog
+from ..models.ai_task import AiTask
+from ..models.model import Model
+from ..providers.exceptions import ProviderError
+from ..providers.factory import get_provider
+from ..services import billing
 
 logger = logging.getLogger("app.task")
 

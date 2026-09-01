@@ -6,10 +6,10 @@
 """
 from fastapi import APIRouter, Depends, UploadFile
 
-from app.core.deps import get_current_user
-from app.core.response import ok
-from app.models.support import User
-from app.services import av_service
+from ..core.deps import get_current_user
+from ..core.response import ok
+from ..models.support import User
+from ..services import av_service
 
 router = APIRouter(tags=["uploads"])
 

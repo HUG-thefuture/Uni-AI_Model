@@ -3,10 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint, func
 from fastapi import  Depends
-from app.core.response import APIError
-from app.core.security import decode_token
-from app.models.base import TimestampMixin, pk_column
-from app.core.db import Base, get_async_db
+from ..core.response import APIError
+from ..core.security import decode_token
+from .base import TimestampMixin, pk_column
+from ..core.db import Base, get_async_db
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 
 

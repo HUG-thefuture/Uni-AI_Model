@@ -15,13 +15,13 @@ from pathlib import Path
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.core.request_id import current_request_id
-from app.core.response import APIError
-from app.models.ai_task import AiTask
-from app.models.model import Model
-from app.models.support import User
-from app.services import billing
+from ..core.config import get_settings
+from ..core.request_id import current_request_id
+from ..core.response import APIError
+from ..models.ai_task import AiTask
+from ..models.model import Model
+from ..models.support import User
+from ..services import billing
 
 # ---------- 上传常量 ----------
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB

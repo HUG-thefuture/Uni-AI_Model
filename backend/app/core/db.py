@@ -6,7 +6,11 @@
 - 同步引擎保留,建表和成员2 的测试继续使用,两者共用同一库。
 - 本期使用逻辑外键,不建物理外键,归属校验在应用层完成。
 """
-from collections.abc import AsyncGenerator, Generator
+import asyncio
+from collections.abc import AsyncGenerator, Callable, Generator
+from typing import TypeVar
+
+T = TypeVar("T")
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from sqlalchemy import create_engine
@@ -14,10 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings
-from app.core.response import APIError
-from app.core.security import decode_token
-# from app.models.user import User
+from .config import   get_settings
+from .response  import APIError
+from .security import decode_token
 
 class Base(DeclarativeBase):
     pass
@@ -83,31 +86,47 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 
 def init_db() -> None:
     """建表(注册全部模型映射)。"""
-    from app.models import ai_call_log, ai_task, model, user  # noqa: F401 注册映射
+    from app.models import (  # noqa: F401 注册映射
+        ai_call_log, ai_task, model, user,
+        api_key, consumption_record, operation_log, recharge_order, support,
+    )
 
     Base.metadata.create_all(bind=engine)
 
 
-#获取解析 token → 查用户 → 校验未禁用
-# bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
-# async def get_current_user(
-# credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-#     db: AsyncSession = Depends(get_async_db),
-# ) -> User:
-#     if credentials is None:
-#         raise APIError(401,"未登录或凭证无效")
-#     try:
-#         head = decode_token(credentials.credentials)
-#         user_id = int(head["sub"])
-#     except Exception:
-#         raise APIError(401, "登录凭证无效或已过期") from None
-#
-#     user = await db.get(User, user_id)
-#     if user is None:
-#         raise APIError(401, "未登录或凭证失效")
-#     if user.status != 1:
-#         raise APIError(403, "账号已被禁用")
-#     return user
+async def run_db(fn: Callable[..., T], /, *args, **kwargs) -> T:
+    """在线程池中执行同步 DB 函数,避免阻塞事件循环。
+
+    async def 路由/后台协程/异步生成器内的 DB 操作一律写成同步辅助函数后经本函数调用:
+    `await run_db(_create_task, db, ...)`;异常(APIError 等)原样向上抛。
+    def 路由与同步依赖(FastAPI 已自动放线程池)无需包裹。
+    Session 非并发安全,须保证同一会话不被多个线程同时使用(顺序 await 即可)。
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+# 获取解析 token → 查用户 → 校验未禁用
+bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
+async def get_current_user(
+credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_async_db),
+):
+    # 延迟导入:models 依赖本模块的 Base,顶层导入会形成循环导入
+    from ..models.user import User
+    if credentials is None:
+        raise APIError(401,"未登录或凭证无效")
+    try:
+        head = decode_token(credentials.credentials)
+        user_id = int(head["sub"])
+    except Exception:
+        raise APIError(401, "登录凭证无效或已过期") from None
+
+    user = await db.get(User, user_id)
+    if user is None:
+        raise APIError(401, "未登录或凭证失效")
+    if user.status != 1:
+        raise APIError(403, "账号已被禁用")
+    return user
 
 
 

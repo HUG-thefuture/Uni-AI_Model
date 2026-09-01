@@ -2,12 +2,12 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db
-from app.core.deps import get_current_user
-from app.core.response import ok
-from app.models.support import User
-from app.schemas.chat import ChatSessionCreate
-from app.services import chat_service
+from ..core.db import get_db
+from ..core.deps import get_current_user
+from ..core.response import ok
+from ..models.support import User
+from ..schemas.chat import ChatSessionCreate
+from ..services import chat_service
 
 router = APIRouter(tags=["chat"])
 

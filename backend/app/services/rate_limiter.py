@@ -7,7 +7,7 @@
 import asyncio
 import time
 
-from app.core.config import get_settings
+from ..core.config import get_settings
 
 
 class RateLimiter:

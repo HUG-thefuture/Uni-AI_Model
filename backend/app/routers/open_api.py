@@ -20,18 +20,18 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.api_key_auth import require_api_key
-from app.core.config import get_settings
-from app.core.db import SessionLocal, get_db, run_db
-from app.core.request_id import current_request_id
-from app.core.response import APIError
-from app.models.ai_call_log import AiCallLog
-from app.models.ai_task import AiTask
-from app.models.model import Model
-from app.models.support import ApiUsageLog, User
-from app.providers.factory import get_provider
-from app.services import billing
-from app.services.rate_limiter import rate_limiter
+from ..core.api_key_auth import require_api_key
+from ..core.config import get_settings
+from ..core.db import SessionLocal, get_db, run_db
+from ..core.request_id import current_request_id
+from ..core.response import APIError
+from ..models.ai_call_log import AiCallLog
+from ..models.ai_task import AiTask
+from ..models.model import Model
+from ..models.support import ApiUsageLog, User
+from ..providers.factory import get_provider
+from ..services import billing
+from ..services.rate_limiter import rate_limiter
 
 logger = logging.getLogger("app.openapi")
 

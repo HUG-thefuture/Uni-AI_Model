@@ -8,8 +8,8 @@ from datetime import datetime
 from sqlalchemy import BigInteger, Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.db import Base
-from app.models.base import pk_column
+from ..core.db import Base
+from .base import pk_column
 
 
 class AiCallLog(Base):

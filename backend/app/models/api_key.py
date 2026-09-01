@@ -1,17 +1,17 @@
 from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from core.db import Base
+from ..core.db import Base
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
     __table_args__ = (
-        # 映射 SQL 中的 KEY idx_user_created (user_id, created_at)
-        Index('idx_user_created', 'user_id', 'created_at'),
-        # 映射 SQL 中的 KEY idx_status (status)
-        Index('idx_status', 'status'),
-        # 映射 SQL 中的 KEY idx_expires_at (expires_at)
-        Index('idx_expires_at', 'expires_at'),
+        # 映射 SQL 中的 KEY idx_api_key_user_created (user_id, created_at)
+        Index('idx_api_key_user_created', 'user_id', 'created_at'),
+        # 映射 SQL 中的 KEY idx_api_key_status (status)
+        Index('idx_api_key_status', 'status'),
+        # 映射 SQL 中的 KEY idx_api_key_expires_at (expires_at)
+        Index('idx_api_key_expires_at', 'expires_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

@@ -9,10 +9,10 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user
-from app.core.db import get_db
-from app.core.response import ok
-from app.services import model_service
+from ..core.deps import get_current_user
+from ..core.db import get_db
+from ..core.response import ok
+from ..services import model_service
 
 router = APIRouter(tags=["models"])
 

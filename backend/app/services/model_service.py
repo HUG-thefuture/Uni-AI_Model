@@ -14,11 +14,11 @@ from datetime import datetime, timedelta
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Query, Session
 
-from app.core.response import APIError
-from app.models.ai_call_log import AiCallLog
-from app.models.ai_task import AiTask
-from app.models.model import Model
-from app.models.support import OperationLog
+from ..core.response import APIError
+from ..models.ai_call_log import AiCallLog
+from ..models.ai_task import AiTask
+from ..models.model import Model
+from ..models.support import OperationLog
 
 # 全组冻结的合法枚举值
 VALID_PROVIDER_TYPES = ("online", "local")

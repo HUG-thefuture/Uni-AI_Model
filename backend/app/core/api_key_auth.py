@@ -12,9 +12,9 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db
-from app.core.response import APIError
-from app.models.support import ApiKey, User
+from ..core.db import get_db
+from ..core.response import APIError
+from ..models.support import ApiKey, User
 
 _bearer = HTTPBearer(auto_error=False)
 

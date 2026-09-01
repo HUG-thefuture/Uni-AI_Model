@@ -6,7 +6,7 @@
     # MySQL 演示库:DATABASE_URL=mysql+pymysql://... SECRET_KEY=... python scripts/seed_demo.py
 
 内容:
-- 2 个演示用户 demo_user / demo_admin(密码哈希用 hashlib.sha256 占位,
+- 2 个演示用户 demo_user / demo_admin(密码哈希用 app.core.security.hash_password,
   成员1 用户模块就绪后由注册流程创建,本脚本仅保证演示链路可登录态展示);
 - 钱包(余额 1000 分);
 - 4 个模型(复用 scripts/seed_models.py 的模板 upsert 逻辑,幂等);
@@ -16,7 +16,6 @@
 - 幂等:用户按 username 判重、模型按 model_code+provider_type upsert、
   任务/会话/日志按固定 request_id 判重,重复执行不重复插入。
 """
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -53,9 +52,10 @@ DEMO_PROMPTS = {
 
 
 def _demo_password_hash() -> str:
-    """占位哈希:hashlib.sha256(密码)。成员1 用户模块就绪后由注册流程创建,
-    届时可直接删除本脚本生成的演示用户或替换为正式哈希算法。"""
-    return hashlib.sha256(DEMO_PASSWORD.encode()).hexdigest()
+    """演示用户密码哈希:使用正式算法 app.core.security.hash_password,
+    保证与 /api/auth/login 的校验逻辑一致。"""
+    from app.core.security import hash_password
+    return hash_password(DEMO_PASSWORD)
 
 
 def _task_request_id(model_code: str, provider_type: str, seq: int) -> str:

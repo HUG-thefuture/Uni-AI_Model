@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from core.db import Base
+from ..core.db import Base
 
 from sqlalchemy import JSON  # 必须引入 JSON 类型
 
@@ -9,12 +9,12 @@ from sqlalchemy import JSON  # 必须引入 JSON 类型
 class OperationLog(Base):
     __tablename__ = "operation_logs"
     __table_args__ = (
-        # 映射 SQL 中的 KEY idx_user_created (user_id, created_at)
-        Index('idx_user_created', 'user_id', 'created_at'),
-        # 映射 SQL 中的 KEY idx_created_at (created_at)
-        Index('idx_created_at', 'created_at'),
-        # 映射 SQL 中的 KEY idx_resource (resource_type, resource_id)
-        Index('idx_resource', 'resource_type', 'resource_id'),
+        # 映射 SQL 中的 KEY idx_oplog_user_created (user_id, created_at)
+        Index('idx_oplog_user_created', 'user_id', 'created_at'),
+        # 映射 SQL 中的 KEY idx_oplog_created_at (created_at)
+        Index('idx_oplog_created_at', 'created_at'),
+        # 映射 SQL 中的 KEY idx_oplog_resource (resource_type, resource_id)
+        Index('idx_oplog_resource', 'resource_type', 'resource_id'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

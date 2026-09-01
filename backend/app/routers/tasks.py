@@ -9,21 +9,21 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db, run_db
-from app.core.deps import get_current_user
-from app.core.request_id import current_request_id
-from app.core.response import APIError, ok
-from app.models.ai_task import AiTask
-from app.models.model import Model
-from app.models.support import User
-from app.schemas.task import (
+from ..core.db import get_db, run_db
+from ..core.deps import get_current_user
+from ..core.request_id import current_request_id
+from ..core.response import APIError, ok
+from ..models.ai_task import AiTask
+from ..models.model import Model
+from ..models.support import User
+from ..schemas.task import (
     AudioAsrTaskCreate,
     AudioCloneTaskCreate,
     ImageTaskCreate,
     TextTaskCreate,
     VideoTaskCreate,
 )
-from app.services import av_service, billing, chat_service, task_service
+from ..services import av_service, billing, chat_service, task_service
 
 router = APIRouter(tags=["tasks"])
 

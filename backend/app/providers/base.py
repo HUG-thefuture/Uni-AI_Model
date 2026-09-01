@@ -14,8 +14,8 @@ from typing import Any, AsyncIterator, Callable
 
 import httpx
 
-from app.core.config import get_settings
-from app.providers.exceptions import ProviderError
+from ..core.config import get_settings
+from .exceptions import ProviderError
 
 logger = logging.getLogger("app.provider")
 

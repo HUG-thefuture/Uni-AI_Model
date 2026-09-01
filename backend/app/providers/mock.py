@@ -15,7 +15,7 @@ import re
 import time
 from typing import AsyncIterator
 
-from app.providers.base import BaseProvider
+from .base import BaseProvider
 
 logger = logging.getLogger("app.provider.mock")
 

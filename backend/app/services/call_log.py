@@ -13,9 +13,9 @@ from typing import Any, Awaitable, Callable
 
 from sqlalchemy.orm import Session
 
-from app.core.db import run_db
-from app.models.ai_call_log import AiCallLog
-from app.providers.exceptions import ProviderError
+from ..core.db import run_db
+from ..models.ai_call_log import AiCallLog
+from ..providers.exceptions import ProviderError
 
 logger = logging.getLogger("app.call_log")
 

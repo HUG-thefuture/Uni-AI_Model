@@ -13,11 +13,11 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db
-from app.core.deps import require_admin
-from app.core.response import ok
-from app.schemas.model import ModelCreateRequest, ModelStatusRequest, ModelUpdateRequest
-from app.services import model_service
+from ..core.db import get_db
+from ..core.deps import require_admin
+from ..core.response import ok
+from ..schemas.model import ModelCreateRequest, ModelStatusRequest, ModelUpdateRequest
+from ..services import model_service
 
 router = APIRouter(prefix="/admin", tags=["admin-models"])
 

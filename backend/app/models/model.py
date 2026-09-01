@@ -6,8 +6,8 @@
 from sqlalchemy import BigInteger, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.db import Base
-from app.models.base import TimestampMixin, pk_column
+from ..core.db import Base
+from .base import TimestampMixin, pk_column
 
 
 class Model(TimestampMixin, Base):

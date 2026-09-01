@@ -1,7 +1,7 @@
 from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from core.db import Base
+from ..core.db import Base
 
 
 class RechargeOrder(Base):
@@ -9,10 +9,10 @@ class RechargeOrder(Base):
     __table_args__ = (
         # 映射 SQL 中的 UNIQUE KEY uk_order_no (order_no)
         # 由于我们在字段定义了 unique=True，这里可以省略；但为了统一表级定义，也可以写上。
-        # 映射 SQL 中的 KEY idx_user_created (user_id, created_at)
-        Index('idx_user_created', 'user_id', 'created_at'),
-        # 映射 SQL 中的 KEY idx_status_created (status, created_at)
-        Index('idx_status_created', 'status', 'created_at'),
+        # 映射 SQL 中的 KEY idx_recharge_user_created (user_id, created_at)
+        Index('idx_recharge_user_created', 'user_id', 'created_at'),
+        # 映射 SQL 中的 KEY idx_recharge_status_created (status, created_at)
+        Index('idx_recharge_status_created', 'status', 'created_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

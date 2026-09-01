@@ -1,20 +1,20 @@
 from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from core.db import Base
+from ..core.db import Base
 
 
 class ConsumptionRecord(Base):
     __tablename__ = "consumption_records"
     __table_args__ = (
-        # 映射 SQL 中的 KEY idx_user_created (user_id, created_at)
-        Index('idx_user_created', 'user_id', 'created_at'),
-        # 映射 SQL 中的 KEY idx_task_id (task_id)
-        Index('idx_task_id', 'task_id'),
-        # 映射 SQL 中的 KEY idx_model_id (model_id)
-        Index('idx_model_id', 'model_id'),
-        # 映射 SQL 中的 KEY idx_status_created (status, created_at)
-        Index('idx_status_created', 'status', 'created_at'),
+        # 映射 SQL 中的 KEY idx_consume_user_created (user_id, created_at)
+        Index('idx_consume_user_created', 'user_id', 'created_at'),
+        # 映射 SQL 中的 KEY idx_consume_task_id (task_id)
+        Index('idx_consume_task_id', 'task_id'),
+        # 映射 SQL 中的 KEY idx_consume_model_id (model_id)
+        Index('idx_consume_model_id', 'model_id'),
+        # 映射 SQL 中的 KEY idx_consume_status_created (status, created_at)
+        Index('idx_consume_status_created', 'status', 'created_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 

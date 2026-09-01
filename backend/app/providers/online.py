@@ -12,9 +12,9 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.core.config import get_settings
-from app.providers.base import BaseProvider
-from app.providers.exceptions import ProviderError
+from ..core.config import get_settings
+from .base import BaseProvider
+from .exceptions import ProviderError
 
 logger = logging.getLogger("app.provider.online")
 
