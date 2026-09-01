@@ -6,7 +6,7 @@
     apiBase: '',
     demoMode: true,
     tokenKey: 'ai_portal_token',
-    loginUrl: ''
+    loginUrl: 'auth.html'
   }, window.PortalConfig || {});
 
   function token() {
@@ -99,6 +99,15 @@
     setToken(value, persistent) {
       clearToken();
       (persistent ? localStorage : sessionStorage).setItem(config.tokenKey, value);
+    },
+    register(payload) {
+      return request({ url: '/api/auth/register', method: 'POST', data: payload, auth: false });
+    },
+    login(payload) {
+      return request({ url: '/api/auth/login', method: 'POST', data: payload, auth: false });
+    },
+    logout() {
+      return request({ url: '/api/auth/logout', method: 'POST' });
     },
     health() {
       return request({ url: '/api/health', auth: false, timeout: 5000 });

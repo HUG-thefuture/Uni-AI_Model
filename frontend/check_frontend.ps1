@@ -31,8 +31,8 @@ function Test-HttpReady {
 try {
   $requiredFiles = @(
     'index.html', 'models.html', 'chat.html', 'image.html',
-    'audio.html', 'video.html', 'tasks.html', 'profile.html',
-    'css/app.css', 'css/hardening.css', 'js/api.js', 'js/app.js',
+    'audio.html', 'video.html', 'tasks.html', 'profile.html', 'auth.html',
+    'css/app.css', 'css/hardening.css', 'css/auth.css', 'js/api.js', 'js/app.js', 'js/auth.js',
     'vendor/jquery/jquery-3.7.1.min.js',
     'vendor/layui/layui.js', 'vendor/layui/css/layui.css',
     'vendor/layui/font/iconfont.woff2'
@@ -43,11 +43,11 @@ try {
   $node = Get-Command node -ErrorAction SilentlyContinue
   if ($node) {
     $syntaxErrors = @()
-    foreach ($scriptFile in @('js/api.js', 'js/app.js')) {
+    foreach ($scriptFile in @('js/api.js', 'js/app.js', 'js/auth.js')) {
       $output = & $node.Source --check (Join-Path $frontend $scriptFile) 2>&1
       if ($LASTEXITCODE -ne 0) { $syntaxErrors += "${scriptFile}: $output" }
     }
-    Add-Result 'javascript_syntax' ($syntaxErrors.Count -eq 0) $(if ($syntaxErrors.Count -gt 0) { $syntaxErrors -join '; ' } else { 'api.js and app.js passed node --check' })
+    Add-Result 'javascript_syntax' ($syntaxErrors.Count -eq 0) $(if ($syntaxErrors.Count -gt 0) { $syntaxErrors -join '; ' } else { 'api.js, app.js and auth.js passed node --check' })
   } else {
     Add-Result 'javascript_syntax' $false 'node command not found'
   }
@@ -62,7 +62,7 @@ try {
 
   $htmlFiles = Get-ChildItem -LiteralPath $frontend -Filter '*.html' -File
   $cdnHits = @($htmlFiles | Select-String -Pattern 'cdn\.staticfile|unpkg\.com|cdn\.jsdelivr|cdnjs\.cloudflare' -ErrorAction SilentlyContinue)
-  Add-Result 'external_cdn' ($cdnHits.Count -eq 0) $(if ($cdnHits.Count -gt 0) { "Found $($cdnHits.Count) external CDN references" } else { 'All 8 pages use local static dependencies' })
+  Add-Result 'external_cdn' ($cdnHits.Count -eq 0) $(if ($cdnHits.Count -gt 0) { "Found $($cdnHits.Count) external CDN references" } else { "All $($htmlFiles.Count) pages use local static dependencies" })
 
   if (-not (Test-HttpReady)) {
     $python = Get-Command python -ErrorAction SilentlyContinue
@@ -77,7 +77,7 @@ try {
   }
 
   $pageResults = @()
-  foreach ($page in @('index.html', 'models.html', 'chat.html', 'image.html', 'audio.html', 'video.html', 'tasks.html', 'profile.html')) {
+  foreach ($page in @('index.html', 'models.html', 'chat.html', 'image.html', 'audio.html', 'video.html', 'tasks.html', 'profile.html', 'auth.html')) {
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
       $response = Invoke-WebRequest -Uri "$baseUrl/${page}?offline_check=1" -UseBasicParsing -TimeoutSec 10
@@ -90,10 +90,10 @@ try {
   }
   $badPages = @($pageResults | Where-Object { $_.status -ne 200 })
   $maxMilliseconds = ($pageResults | Measure-Object -Property milliseconds -Maximum).Maximum
-  Add-Result 'page_http_access' ($badPages.Count -eq 0) $(if ($badPages.Count -gt 0) { 'Failed pages: ' + (($badPages | ForEach-Object page) -join ', ') } else { "All 8 pages returned 200; slowest ${maxMilliseconds}ms" })
+  Add-Result 'page_http_access' ($badPages.Count -eq 0) $(if ($badPages.Count -gt 0) { 'Failed pages: ' + (($badPages | ForEach-Object page) -join ', ') } else { "All $($pageResults.Count) pages returned 200; slowest ${maxMilliseconds}ms" })
 
   $assetResults = @()
-  foreach ($asset in @('css/app.css', 'css/hardening.css', 'js/api.js', 'js/app.js', 'vendor/jquery/jquery-3.7.1.min.js', 'vendor/layui/layui.js', 'vendor/layui/font/iconfont.woff2')) {
+  foreach ($asset in @('css/app.css', 'css/hardening.css', 'css/auth.css', 'js/api.js', 'js/app.js', 'js/auth.js', 'vendor/jquery/jquery-3.7.1.min.js', 'vendor/layui/layui.js', 'vendor/layui/font/iconfont.woff2')) {
     try {
       $response = Invoke-WebRequest -Uri "$baseUrl/${asset}?offline_check=1" -UseBasicParsing -TimeoutSec 10
       $assetResults += [PSCustomObject]@{ asset = $asset; status = $response.StatusCode; bytes = $response.RawContentLength }

@@ -12,8 +12,9 @@
 - `video.html`：视频合成站
 - `tasks.html`：创作历史
 - `profile.html`：个人中心
+- `auth.html`：登录注册（账号密码可联调；短信验证码待接口）
 
-八个物理入口复用 `css/app.css`、`css/hardening.css`、`js/api.js` 和 `js/app.js`。页面内使用Hash路由，公共顶部栏、侧栏和任务状态组件只维护一份。
+九个物理入口复用门户样式与接口封装；`auth.html` 使用独立的 `css/auth.css` 和 `js/auth.js`，其余业务页共享 `css/app.css`、`css/hardening.css`、`js/api.js` 和 `js/app.js`。页面内使用Hash路由，公共顶部栏、侧栏和任务状态组件只维护一份。
 
 ## 本地预览
 
@@ -62,8 +63,8 @@ python -m http.server 4174 --bind 127.0.0.1 --directory frontend
 - 成功数据读取 `{code:0,message,data,request_id}` 中的 `data`；
 - 统一处理400、401、403、404、409、429、500和网络中断；
 - 401时清理Token并触发 `portal:unauthorized` 事件；
-- 配置 `PortalConfig.loginUrl` 后，非演示模式可跳转登录页并携带 `return_to`；
-- 已封装健康检查、当前用户、资料更新、模型列表、任务提交和任务详情方法；
+- 默认登录页为 `auth.html`；非演示模式会携带受限的 `return_to` 回跳地址；
+- 已封装注册、登录、退出、健康检查、当前用户、资料更新、模型列表、任务提交和任务详情方法；
 - 前端不直连第三方模型服务。
 
 当前业务页面仍使用明确标注的演示数据。成员1、2、4提供正式响应样例后，再切换真实数据源；不要自行猜测任务列表、媒体URL、上传和钱包字段。
@@ -79,6 +80,7 @@ PortalApi.health().then(console.log).catch(console.error)
 ```powershell
 node --check frontend/js/api.js
 node --check frontend/js/app.js
+node --check frontend/js/auth.js
 ```
 
 完整静态自检：
@@ -87,7 +89,7 @@ node --check frontend/js/app.js
 powershell -ExecutionPolicy Bypass -File frontend/check_frontend.ps1 -FrontendDir frontend -ReportPath "交付记录/day2—交付/成员3-前端加固证据/自检结果.json"
 ```
 
-已验证内容：八个入口返回 200、本地静态依赖返回 200、模型搜索保持输入焦点、失败任务可重试、任务和资料刷新后保留、390px 移动端无横向溢出、移动端侧栏自动收起、菜单键盘操作正常、表单均有标签、任务“查看”可路由、用户输入按文本展示、浏览器控制台无错误或警告。
+已验证内容：九个入口返回 200、本地静态依赖返回 200、认证页账号密码/短信待接口切换、演示模式不会伪造登录、模型搜索保持输入焦点、失败任务可重试、任务和资料刷新后保留、390px 移动端无横向溢出、移动端侧栏自动收起、菜单键盘操作正常、表单均有标签、任务“查看”可路由、用户输入按文本展示、浏览器控制台无错误或警告。
 
 Chrome 桌面端和 390px 移动视口证据保存在 `交付记录/day2—交付/成员3-前端加固证据/`。Firefox、Safari、屏幕阅读器、200% 缩放和真实后端联调尚未验证，不能从本地静态验收结果外推。
 

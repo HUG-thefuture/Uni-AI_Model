@@ -3,7 +3,7 @@
   'use strict';
 
   // 联调时由成员2、4提供真实地址；演示模式不会向任何第三方模型厂商发送请求。
-  window.PortalConfig = Object.assign({ apiBase: '', demoMode: true, loginUrl: '' }, window.PortalConfig || {});
+  window.PortalConfig = Object.assign({ apiBase: '', demoMode: true, loginUrl: 'auth.html' }, window.PortalConfig || {});
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
   const routeTitles = {
@@ -209,7 +209,9 @@
               <button class="account-menu-item" type="button" role="menuitem" data-route="profile">${icon('layui-icon-user')}<span>个人中心</span></button>
               <button class="account-menu-item" type="button" role="menuitem" data-route="tasks">${icon('layui-icon-list')}<span>创作历史</span></button>
               <div class="account-menu-divider" role="separator"></div>
-              <button class="account-menu-item account-menu-item-disabled" type="button" role="menuitem" aria-disabled="true" disabled title="等待成员1退出登录接口">${icon('layui-icon-logout')}<span>退出登录</span><small>待接口</small></button>
+              ${window.PortalConfig.demoMode
+                ? `<button class="account-menu-item account-menu-item-disabled" type="button" role="menuitem" aria-disabled="true" disabled title="演示模式未建立真实登录状态">${icon('layui-icon-logout')}<span>退出登录</span><small>演示模式</small></button>`
+                : `<button class="account-menu-item" type="button" role="menuitem" data-logout>${icon('layui-icon-logout')}<span>退出登录</span></button>`}
             </div>
           </div>
         </div>
@@ -456,6 +458,18 @@
     $(document).off('keydown.mobileNav').on('keydown.mobileNav', event => { if (event.key === 'Escape' && $('.sidebar').hasClass('open')) { closeMobileNav(); $('.mobile-nav-toggle').trigger('focus'); } });
     syncMobileNav(false);
     syncAccountMenu(false);
+    $('[data-logout]').on('click', function () {
+      const button = $(this);
+      button.prop('disabled', true).attr('aria-disabled', 'true');
+      closeAccountMenu();
+      window.PortalApi.logout().catch(error => {
+        toast(error && error.message ? `服务端退出失败：${error.message}，已清除本机登录状态。` : '服务端退出失败，已清除本机登录状态。', 'error');
+      }).finally(() => {
+        window.PortalApi.clearToken();
+        const loginUrl = safeNavigationUrl(window.PortalConfig.loginUrl) || 'auth.html';
+        window.location.assign(loginUrl);
+      });
+    });
     $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; setRoute('text'); } else if (found.type === '生图模型') setRoute('image'); else if (found.type === 'TTS模型') setRoute('audio'); else if (found.type === '生视频模型') setRoute('video'); else toast('该模型的应用入口正在准备中。'); });
     $('[data-source]').on('click', function () { state.modelSource = $(this).data('source'); render(); });
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });

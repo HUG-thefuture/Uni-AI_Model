@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="四川高校大模型门户登录与注册" />
+  <title>登录 - 四川高校大模型门户</title>
+  <link rel="stylesheet" href="vendor/layui/css/layui.css" />
+  <link rel="stylesheet" href="css/app.css?v=20260901-1" />
+  <link rel="stylesheet" href="css/hardening.css?v=20260901-1" />
+  <link rel="stylesheet" href="css/auth.css?v=20260901-1" />
+</head>
+<body class="auth-page">
+  <main class="auth-layout" aria-labelledby="auth-title">
+    <section class="auth-intro" aria-label="门户介绍">
+      <a class="auth-brand" href="index.html"><span class="brand-mark"><i class="layui-icon layui-icon-light"></i></span><span>四川高校大模型门户</span></a>
+      <div class="auth-intro-copy"><h1>把灵感，变成作品。</h1><p>在一个入口中使用文本、图像、声音和视频创作工具，保存每一次探索的过程。</p></div>
+      <ul class="auth-capabilities" aria-label="门户能力">
+        <li><i class="layui-icon layui-icon-dialogue"></i><span><strong>文本交互</strong><small>写作、问答与思路整理</small></span></li>
+        <li><i class="layui-icon layui-icon-picture"></i><span><strong>视觉生成</strong><small>图像与视频创作任务</small></span></li>
+        <li><i class="layui-icon layui-icon-voice"></i><span><strong>声音创作</strong><small>语音合成和风格探索</small></span></li>
+      </ul>
+      <p class="auth-intro-foot">课程项目演示版 · 请使用本人账号</p>
+    </section>
+    <section class="auth-panel-wrap"><div class="auth-panel">
+      <a class="auth-back" href="index.html"><i class="layui-icon layui-icon-left"></i>返回门户首页</a>
+      <div class="auth-panel-heading"><h2 id="auth-title">欢迎回来</h2><p id="auth-subtitle">登录后即可继续你的创作任务。</p></div>
+      <div class="auth-mode-tabs" role="tablist" aria-label="认证方式">
+        <button class="auth-mode-tab active" type="button" role="tab" id="password-tab" aria-selected="true" aria-controls="password-pane">账号密码</button>
+        <button class="auth-mode-tab" type="button" role="tab" id="sms-tab" aria-selected="false" aria-controls="sms-pane">短信验证码</button>
+      </div>
+      <section id="password-pane" role="tabpanel" aria-labelledby="password-tab"><form id="auth-form" novalidate>
+        <div class="form-block"><label class="field-label" for="auth-username">用户名</label><input class="field" id="auth-username" autocomplete="username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_]{3,32}" placeholder="3-32位字母、数字或下划线" required /><p class="field-hint">注册后用户名不可修改。</p></div>
+        <div class="form-block auth-register-only" hidden><label class="field-label" for="auth-nickname">昵称 <span>（可选）</span></label><input class="field" id="auth-nickname" autocomplete="nickname" maxlength="50" placeholder="在门户中显示的名称" /></div>
+        <div class="form-block auth-register-only" hidden><label class="field-label" for="auth-school">学校 <span>（可选）</span></label><input class="field" id="auth-school" autocomplete="organization" maxlength="100" placeholder="如：四川大学" /></div>
+        <div class="form-block"><label class="field-label" for="auth-password">密码</label><div class="password-field"><input class="field" id="auth-password" type="password" autocomplete="current-password" minlength="8" maxlength="64" placeholder="至少8位" required /><button class="password-toggle" type="button" data-toggle-password="auth-password" aria-label="显示密码"><i class="layui-icon layui-icon-eye"></i></button></div></div>
+        <div class="form-block auth-register-only" hidden><label class="field-label" for="auth-password-confirm">确认密码</label><div class="password-field"><input class="field" id="auth-password-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="64" placeholder="再次输入密码" /><button class="password-toggle" type="button" data-toggle-password="auth-password-confirm" aria-label="显示确认密码"><i class="layui-icon layui-icon-eye"></i></button></div></div>
+        <label class="auth-remember"><input type="checkbox" id="auth-remember" checked /><span>在此设备上保持登录</span></label>
+        <p class="auth-error" id="auth-error" role="alert" hidden></p><button class="btn-primary auth-submit" id="auth-submit" type="submit">登录并进入门户</button>
+      </form><p class="auth-switch"><span id="auth-switch-label">还没有账号？</span><button type="button" id="auth-switch">创建账号</button></p></section>
+      <section id="sms-pane" role="tabpanel" aria-labelledby="sms-tab" hidden><div class="auth-pending" role="status"><span class="auth-pending-icon"><i class="layui-icon layui-icon-cellphone"></i></span><h3>短信验证码正在对接</h3><p>当前后端尚未提供短信发送和校验接口。为避免展示无法验证的伪功能，此通道将在接口确认后开放。</p><button class="btn-secondary" type="button" data-return-password>使用账号密码登录</button></div></section>
+      <p class="auth-notice"><i class="layui-icon layui-icon-tips"></i><span>请勿在公共设备上勾选“保持登录”。演示模式不建立真实登录状态。</span></p>
+    </div></section>
+  </main>
+  <script src="vendor/jquery/jquery-3.7.1.min.js"></script><script src="js/api.js?v=20260901-1"></script><script src="js/auth.js?v=20260901-1"></script>
+</body>
+</html>
