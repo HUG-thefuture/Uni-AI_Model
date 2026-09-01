@@ -72,6 +72,7 @@
     return normalized || fallback;
   }
 
+
   function applyCurrentUser(profile) {
     if (!profile || typeof profile !== 'object') return;
     const source = profile.user && typeof profile.user === 'object' ? profile.user : profile;
