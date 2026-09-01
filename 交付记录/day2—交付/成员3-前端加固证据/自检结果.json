@@ -1,0 +1,122 @@
+﻿{
+    "generated_at":  "2026-08-30 23:53:50 +08:00",
+    "frontend_dir":  "D:\\ClassWk\\class260720\\四川高校ai大模型门户\\Uni-AI_Model\\frontend",
+    "base_url":  "http://127.0.0.1:4175",
+    "passed":  true,
+    "checks":  [
+                   {
+                       "name":  "required_files",
+                       "passed":  true,
+                       "detail":  "16 required files found"
+                   },
+                   {
+                       "name":  "javascript_syntax",
+                       "passed":  true,
+                       "detail":  "api.js and app.js passed node --check"
+                   },
+                   {
+                       "name":  "git_conflict_markers",
+                       "passed":  true,
+                       "detail":  "No conflict markers found"
+                   },
+                   {
+                       "name":  "common_secret_patterns",
+                       "passed":  true,
+                       "detail":  "No common key or private-key patterns found"
+                   },
+                   {
+                       "name":  "external_cdn",
+                       "passed":  true,
+                       "detail":  "All 8 pages use local static dependencies"
+                   },
+                   {
+                       "name":  "page_http_access",
+                       "passed":  true,
+                       "detail":  "All 8 pages returned 200; slowest 13ms"
+                   },
+                   {
+                       "name":  "local_static_assets",
+                       "passed":  true,
+                       "detail":  "All 7 core assets are accessible"
+                   }
+               ],
+    "pages":  [
+                  {
+                      "page":  "index.html",
+                      "status":  200,
+                      "milliseconds":  13
+                  },
+                  {
+                      "page":  "models.html",
+                      "status":  200,
+                      "milliseconds":  10
+                  },
+                  {
+                      "page":  "chat.html",
+                      "status":  200,
+                      "milliseconds":  11
+                  },
+                  {
+                      "page":  "image.html",
+                      "status":  200,
+                      "milliseconds":  12
+                  },
+                  {
+                      "page":  "audio.html",
+                      "status":  200,
+                      "milliseconds":  11
+                  },
+                  {
+                      "page":  "video.html",
+                      "status":  200,
+                      "milliseconds":  11
+                  },
+                  {
+                      "page":  "tasks.html",
+                      "status":  200,
+                      "milliseconds":  11
+                  },
+                  {
+                      "page":  "profile.html",
+                      "status":  200,
+                      "milliseconds":  11
+                  }
+              ],
+    "assets":  [
+                   {
+                       "asset":  "css/app.css",
+                       "status":  200,
+                       "bytes":  25252
+                   },
+                   {
+                       "asset":  "css/hardening.css",
+                       "status":  200,
+                       "bytes":  3852
+                   },
+                   {
+                       "asset":  "js/api.js",
+                       "status":  200,
+                       "bytes":  4325
+                   },
+                   {
+                       "asset":  "js/app.js",
+                       "status":  200,
+                       "bytes":  51172
+                   },
+                   {
+                       "asset":  "vendor/jquery/jquery-3.7.1.min.js",
+                       "status":  200,
+                       "bytes":  87535
+                   },
+                   {
+                       "asset":  "vendor/layui/layui.js",
+                       "status":  200,
+                       "bytes":  368866
+                   },
+                   {
+                       "asset":  "vendor/layui/font/iconfont.woff2",
+                       "status":  200,
+                       "bytes":  29736
+                   }
+               ]
+}
