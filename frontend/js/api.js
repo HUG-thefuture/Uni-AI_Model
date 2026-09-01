@@ -141,6 +141,12 @@
     currentUser() {
       return request({ url: '/api/auth/me' });
     },
+    wallet() {
+      return request({ url: '/api/wallet/me' });
+    },
+    recharge(payload) {
+      return request({ url: '/api/wallet/recharge', method: 'POST', data: payload });
+    },
     updateProfile(payload) {
       return request({ url: '/api/user/profile', method: 'PUT', data: payload });
     },

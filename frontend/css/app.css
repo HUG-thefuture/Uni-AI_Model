@@ -225,6 +225,14 @@ button:disabled { cursor: not-allowed; }
 .tip-box { margin-top: 14px; padding: 13px 14px; border-radius: 9px; background: #eef6ff; color: #4a6995; font-size: 12px; line-height: 1.75; }.tip-box strong { display: block; color: #3166b1; }
 
 .profile-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); gap: 18px; }.profile-card { text-align: center; }.profile-avatar { width: 72px; height: 72px; display: grid; place-items: center; margin: 7px auto 12px; border-radius: 22px; background: linear-gradient(135deg, #427ff0, #2460ca); color: #fff; font-size: 27px; font-weight: 800; }.profile-name { margin: 0; font-size: 20px; }.profile-card p { margin: 7px 0 19px; color: var(--muted); font-size: 13px; }.metric-row { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 18px; border-top: 1px solid var(--line); }.metric { padding: 16px 4px 0; }.metric strong { display: block; font-size: 18px; }.metric span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.profile-actions { display: flex; justify-content: center; margin-top: 16px; }
+.recharge-panel { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #f8fbff; text-align: left; }
+.recharge-input-wrap { position: relative; }
+.recharge-input-wrap .field { padding-right: 38px; }
+.recharge-unit { position: absolute; top: 50%; right: 12px; color: var(--muted); transform: translateY(-50%); font-size: 13px; }
+.recharge-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: -2px; }
+.recharge-preset { min-height: 34px; padding: 0 12px; }
+.recharge-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .notice { display: flex; gap: 10px; align-items: flex-start; padding: 14px; border-radius: 10px; background: var(--primary-soft); color: #4d6590; font-size: 13px; line-height: 1.6; }.notice .layui-icon { margin-top: 2px; color: var(--primary); }
 
 .skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 10px 14px; border-radius: 8px; background: #172033; color: #fff; text-decoration: none; transform: translateY(-150%); transition: transform .16s ease-out; }

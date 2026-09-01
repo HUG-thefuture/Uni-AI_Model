@@ -29,7 +29,7 @@
     audioHistory: [],
     videoHistory: [],
     tasks: [],
-    busy: { text: false, image: false, audio: false, video: false, profile: false }
+    busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false }
   };
 
   let user = { name: '用户', initial: 'U', balance: '—', school: '未加载学校', realName: '未认证', role: 'user' };
@@ -349,8 +349,38 @@
     const verified = user.realName === '已认证';
     const roleLabel = user.role === 'admin' ? '管理员' : '普通用户';
     const modelCount = window.PortalConfig.demoMode ? '3' : '—';
+    const rechargeDisabled = window.PortalConfig.demoMode ? 'disabled aria-disabled="true" title="演示模式未连接充值接口"' : '';
     return `${pageHead('个人中心', '查看实名认证状态、账户概况和个人资料。')}
-      <section class="profile-grid"><article class="panel panel-pad profile-card"><div class="profile-avatar">${escapeHtml(user.initial)}</div><h2 class="profile-name">${escapeHtml(user.name)}</h2><p>${escapeHtml(user.school)} · ${escapeHtml(roleLabel)}</p><span class="status-tag ${verified ? 'success' : 'pending'}">${icon('layui-icon-vercode')} ${escapeHtml(user.realName)}</span><div class="metric-row"><div class="metric"><strong>¥${escapeHtml(user.balance)}</strong><span>账户余额</span></div><div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div><div class="metric"><strong>${modelCount}</strong><span>可用模型</span></div></div></article><section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="${escapeHtml(user.realName)}" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="${escapeHtml(roleLabel)}" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包、账单、充值和发票将由成员4模块提供真实数据接口。当前页面仅展示成员3负责的统一门户入口。</div></div></section></section>`;
+      <section class="profile-grid">
+        <article class="panel panel-pad profile-card">
+          <div class="profile-avatar">${escapeHtml(user.initial)}</div>
+          <h2 class="profile-name">${escapeHtml(user.name)}</h2>
+          <p>${escapeHtml(user.school)} · ${escapeHtml(roleLabel)}</p>
+          <span class="status-tag ${verified ? 'success' : 'pending'}">${icon('layui-icon-vercode')} ${escapeHtml(user.realName)}</span>
+          <div class="metric-row">
+            <div class="metric"><strong>¥${escapeHtml(user.balance)}</strong><span>账户余额</span></div>
+            <div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div>
+            <div class="metric"><strong>${modelCount}</strong><span>可用模型</span></div>
+          </div>
+          <div class="profile-actions">
+            <button class="btn-primary" id="recharge-open" type="button" ${rechargeDisabled}>${icon('layui-icon-rmb')}充值</button>
+          </div>
+          <div class="recharge-panel" id="recharge-panel" hidden>
+            <form id="recharge-form">
+              <div class="form-block">
+                <label class="field-label" for="recharge-amount">充值金额（元）</label>
+                <div class="recharge-input-wrap"><input class="field" id="recharge-amount" type="number" min="0.01" max="10000" step="0.01" inputmode="decimal" required placeholder="请输入金额" /><span class="recharge-unit">元</span></div>
+              </div>
+              <div class="recharge-presets" role="group" aria-label="快捷充值金额">
+                ${[10, 50, 100].map(amount => `<button type="button" class="btn-secondary recharge-preset" data-recharge-amount="${amount}">${amount} 元</button>`).join('')}
+              </div>
+              <p class="state-note">${icon('layui-icon-tips')} 模拟充值按“分”提交，到账后余额自动更新。</p>
+              <div class="recharge-actions"><button class="btn-quiet" id="recharge-cancel" type="button">取消</button><button class="btn-primary" id="recharge-submit" type="submit" ${state.busy.recharge ? 'disabled' : ''}>${state.busy.recharge ? '正在提交…' : '确认充值'}</button></div>
+            </form>
+          </div>
+        </article>
+        <section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="${escapeHtml(user.realName)}" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="${escapeHtml(roleLabel)}" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包余额与充值结果来自后端接口，账单和发票功能将在对应模块接入后开放。</div></div></section>
+      </section>`;
   }
 
   function viewFor(route) {
@@ -527,6 +557,42 @@
       setRoute(record.kind);
     });
     $('#clear-demo-history').on('click', function () { if (!window.confirm('确定清空全部演示任务记录吗？此操作无法撤销。')) return; state.imageHistory = []; state.audioHistory = []; state.videoHistory = []; state.tasks = []; taskTimers.forEach(timers => timers.forEach(timer => clearTimeout(timer))); taskTimers.clear(); persistDemoState(); toast('演示任务记录已清空。', 'success'); render(); });
+    $('#recharge-open').on('click', function () {
+      if (window.PortalConfig.demoMode) return;
+      $('#recharge-panel').prop('hidden', false);
+      $('#recharge-amount').trigger('focus');
+    });
+    $('#recharge-cancel').on('click', () => $('#recharge-panel').prop('hidden', true));
+    $('[data-recharge-amount]').on('click', function () {
+      $('#recharge-amount').val($(this).data('recharge-amount')).trigger('focus');
+    });
+    $('#recharge-form').on('submit', function (event) {
+      event.preventDefault();
+      if (window.PortalConfig.demoMode || state.busy.recharge) return;
+      const yuan = Number($('#recharge-amount').val());
+      if (!Number.isFinite(yuan) || yuan <= 0 || yuan > 10000) return toast('请输入 0.01–10000 元的充值金额。', 'error');
+      const cents = Math.round(yuan * 100);
+      if (cents <= 0) return toast('充值金额必须大于 0.01 元。', 'error');
+      state.busy.recharge = true;
+      $('#recharge-submit').prop('disabled', true).text('正在提交…');
+      window.PortalApi.recharge({ amount: cents, payment_method: 'mock' }).then(result => {
+        return window.PortalApi.wallet().then(wallet => {
+          const balance = Number(wallet && wallet.balance);
+          if (Number.isFinite(balance)) user.balance = (balance / 100).toFixed(2);
+          return { result, refreshed: true };
+        }).catch(() => ({ result, refreshed: false }));
+      }).then(({ result, refreshed }) => {
+        state.busy.recharge = false;
+        $('#recharge-panel').prop('hidden', true);
+        const order = result && result.order_no ? `订单号：${result.order_no}` : '';
+        toast(refreshed ? `充值成功，余额已更新。${order}` : `充值成功，请刷新余额。${order}`, 'success');
+        render();
+      }).catch(error => {
+        state.busy.recharge = false;
+        $('#recharge-submit').prop('disabled', false).text('确认充值');
+        toast(error && error.message ? error.message : '充值失败，请稍后重试。', 'error');
+      });
+    });
     $('#profile-form').on('submit', function (event) { event.preventDefault(); const name = $('#profile-name').val().trim(); const school = $('#profile-school').val().trim(); if (!name || !school) return toast('昵称和学校不能为空。', 'error'); state.busy.profile = true; user.name = normalizeText(name, user.name, 30); user.initial = Array.from(user.name)[0].toUpperCase(); user.school = normalizeText(school, user.school, 50); state.busy.profile = false; persistDemoState(); toast('个人资料已保存到本机演示数据。', 'success'); render(); });
   }
 
