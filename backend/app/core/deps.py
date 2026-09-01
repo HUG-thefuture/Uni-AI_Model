@@ -21,23 +21,23 @@ def _credentials_error() -> APIError:
     return APIError(401, "未登录或凭证失效")
 
 
-def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> User:
-    if creds is None or not creds.credentials:
-        raise _credentials_error()
-    try:
-        payload = decode_token(creds.credentials)
-    except pyjwt.PyJWTError:
-        raise _credentials_error()
-    user_id = payload.get("sub")
-    if not user_id:
-        raise _credentials_error()
-    user = db.get(User, int(user_id))
-    if user is None or user.status != 1:  # 禁用立即失效
-        raise _credentials_error()
-    return user
+# def get_current_user(
+#     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+#     db: Session = Depends(get_db),
+# ) -> User:
+#     if creds is None or not creds.credentials:
+#         raise _credentials_error()
+#     try:
+#         payload = decode_token(creds.credentials)
+#     except pyjwt.PyJWTError:
+#         raise _credentials_error()
+#     user_id = payload.get("sub")
+#     if not user_id:
+#         raise _credentials_error()
+#     user = db.get(User, int(user_id))
+#     if user is None or user.status != 1:  # 禁用立即失效
+#         raise _credentials_error()
+#     return user
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
