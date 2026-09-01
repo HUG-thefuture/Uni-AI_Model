@@ -5,18 +5,18 @@
 - 模型/任务等业务路由由成员2 后续工作包(WP02+)挂载。
 """
 import logging
+import os
 import sys
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from app.core.config import get_settings
-from app.core.request_id import RequestIdMiddleware
-from app.core.response import ok, register_exception_handlers
-from app.routers import auth,wallet
+from .core.config import get_settings
+from .core.request_id import RequestIdMiddleware
+from .core.response import ok, register_exception_handlers
+from .routers import admin_models, api_key, auth, chat, models, open_api, stats, tasks, uploads
 from fastapi.middleware.cors import CORSMiddleware
-
-from schemas import stats
 
 
 def create_app() -> FastAPI:
@@ -27,12 +27,11 @@ def create_app() -> FastAPI:
         stream=sys.stdout,
     )
 
-    app = FastAPI(title="AI 大模型门户", version="0.1.0", docs_url=f"{settings.api_prefix}/docs")
-    #CORS:前后端分离联调
+    app = FastAPI(title="AI 大模型门户", version="0.2.0", docs_url=f"{settings.api_prefix}/docs")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -44,11 +43,21 @@ def create_app() -> FastAPI:
         """存活探针:供 Nginx/Supervisor 与每日集成验收使用。"""
         return ok(data={"status": "up", "service": "ai-portal-backend"})
 
-    # 注册接口:POST /api/auth/register
-    app.include_router(auth.router, prefix=settings.api_prefix)
-    app.include_router(wallet.router, prefix=settings.api_prefix)
+    os.makedirs(settings.upload_dir, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=settings.upload_dir), name="static")
 
-    app.include_router(stats.router, prefix=settings.api_prefix)
+    app.include_router(auth.router, prefix=settings.api_prefix)
+    for prefix in (settings.api_prefix, "/api/v1"):
+        app.include_router(models.router, prefix=prefix)
+        app.include_router(admin_models.router, prefix=prefix)
+        app.include_router(chat.router, prefix=prefix)
+        app.include_router(tasks.router, prefix=prefix)
+        app.include_router(open_api.router, prefix=prefix)
+        app.include_router(uploads.router, prefix=prefix)
+        app.include_router(stats.router, prefix=prefix)
+    from .routers import wallet
+    app.include_router(wallet.router)
+    app.include_router(api_key.router)
     return app
 
 

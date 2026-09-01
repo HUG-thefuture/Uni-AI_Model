@@ -6,7 +6,11 @@
 - 同步引擎保留,建表和成员2 的测试继续使用,两者共用同一库。
 - 本期使用逻辑外键,不建物理外键,归属校验在应用层完成。
 """
-from collections.abc import AsyncGenerator, Generator
+import asyncio
+from collections.abc import AsyncGenerator, Callable, Generator
+from typing import TypeVar
+
+T = TypeVar("T")
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from sqlalchemy import create_engine
@@ -86,6 +90,11 @@ def init_db() -> None:
     from app.models import ai_call_log, ai_task, model, user,api_key,consumption_record,operation_log,recharge_order  # noqa: F401 注册映射
 
     Base.metadata.create_all(bind=engine)
+
+
+async def run_db(fn: Callable[..., T], /, *args, **kwargs) -> T:
+    """在线程池执行同步数据库操作，避免阻塞事件循环。"""
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 #获取解析 token → 查用户 → 校验未禁用

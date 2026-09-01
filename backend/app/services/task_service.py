@@ -183,7 +183,8 @@ async def run_async_task(task_id: int) -> None:
         else:
             raise ProviderError("not_implemented", "该任务类型暂未开放,请等待后续版本")
 
-        await run_db(_finalize_success, db, task, model, start)
+        # db 与 task 属于当前 worker 线程，不能交给 run_db 的另一个线程使用。
+        _finalize_success(db, task, model, start)
         success = True
     except (asyncio.TimeoutError, TimeoutError):
         error_code = "provider_timeout"

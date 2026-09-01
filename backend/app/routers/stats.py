@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.db import get_db
-from models.user import get_current_user
-from schemas.stats import UsageStatsResponse
-from services import stats
+from ..core.db import get_async_db
+from ..models.user import get_current_user
+from ..schemas.stats import UsageStatsResponse
+from ..services import stats
 
 router = APIRouter(
     prefix="/stats",
@@ -12,6 +12,6 @@ router = APIRouter(
 )
 
 @router.get("/usage",response_model=UsageStatsResponse)
-async def usage_stats(db:AsyncSession=Depends(get_db),current_user=Depends(get_current_user)):
+async def usage_stats(db:AsyncSession=Depends(get_async_db),current_user=Depends(get_current_user)):
     stmt=await stats.get_stats_usage(db,current_user.id)
     return stmt
