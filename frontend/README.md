@@ -30,9 +30,11 @@ python -m http.server 4174 --bind 127.0.0.1 --directory frontend
 
 ## 当前演示模式
 
-`js/api.js`中的 `demoMode` 默认为 `true`。演示模式具备：
+`js/config.js`中的 `demoMode` 默认为 `false`（真实后端联调），`js/api.js` 兜底默认仍是 `true`。联调模式具备：
 
-- 图像、声音、视频任务的待处理、处理中、成功、失败状态；
+- 认证（注册 / 登录 / 退出 / 当前用户）直连后端真实接口；
+- 模型广场、任务中心等业务页面按成员1/2/4 交付节奏逐步切换真实数据源；
+- 演示模式（`demoMode: true`）保留离线验收能力：图像、声音、视频任务的待处理、处理中、成功、失败状态；
 - 任务记录和个人资料本地持久化，刷新页面后仍保留；
 - 失败任务真正重新提交，并在第二次演示中完成；
 - 文本、图像、声音、视频输入包含 `#失败` 时确定性模拟失败，便于验收异常流程；
@@ -53,6 +55,22 @@ python -m http.server 4174 --bind 127.0.0.1 --directory frontend
 - 调整次要文字与状态文字对比度，提供减少动态效果和无 JavaScript 提示；
 - 每个页面只保留一个一级标题，并根据当前页面更新浏览器标题；
 - 删除未使用的 Layui JavaScript 请求，继续保留本地 Layui CSS 与图标字体。
+
+## 前后端联通（2026-09-01）
+
+`js/config.js` 是前后端联通的单一切换开关（先于 `js/api.js` 加载）：
+
+```javascript
+window.PortalConfig = {
+  apiBase: 'http://127.0.0.1:8000',  // 后端 FastAPI 地址（backend/，uvicorn 默认 8000）
+  demoMode: false                     // false=走真实后端；true=纯本地演示数据
+};
+```
+
+- 后端 CORS 已放行 `localhost / 127.0.0.1` 任意端口，跨域可直接访问；
+- 登录成功后 Token 存 `sessionStorage`/`localStorage`（勾选“保持登录”），请求自动带 `Authorization: Bearer <token>`；
+- 401 自动清理 Token 并携带 `return_to` 回跳 `auth.html`；
+- 已联调验证：注册 → 登录 → `/api/auth/me`（用户+资料+钱包）→ `/api/models` → 退出，全部返回 `{code:0, ...}`。
 
 ## 接口对接
 

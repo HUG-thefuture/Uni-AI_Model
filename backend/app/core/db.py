@@ -7,13 +7,15 @@
 - 本期使用逻辑外键,不建物理外键,归属校验在应用层完成。
 """
 import asyncio
+import logging
+import time
 from collections.abc import AsyncGenerator, Callable, Generator
 from typing import TypeVar
 
 T = TypeVar("T")
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
@@ -36,13 +38,41 @@ def _build_engine():
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
     else:
-        # MySQL:连接池与回收,避免长时间空闲后断连
-        kwargs.update(pool_size=10, max_overflow=20, pool_recycle=3600)
+        # MySQL:连接池与回收(WP09 固化参数),避免长时间空闲后断连
+        kwargs.update(pool_size=20, max_overflow=10, pool_recycle=1800)
     return create_engine(url, **kwargs)
 
 
 engine = _build_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+
+
+# ---------- 慢查询日志(WP09 固化:单条 SQL 超过 SLOW_QUERY_MS 记 warning,logger=app.db) ----------
+
+_db_logger = logging.getLogger("app.db")
+
+
+def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    conn.info["_query_started"] = time.perf_counter()
+
+
+def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    started = conn.info.pop("_query_started", None)
+    if started is None:
+        return
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    try:
+        threshold = get_settings().slow_query_ms
+    except Exception:  # noqa: BLE001 配置异常时不阻塞查询
+        threshold = 500
+    if elapsed_ms >= threshold:
+        _db_logger.warning(
+            "慢查询 %.0fms SQL=%s", elapsed_ms, str(statement)[:200]
+        )
+
+
+event.listen(engine, "before_cursor_execute", _before_cursor_execute)
+event.listen(engine, "after_cursor_execute", _after_cursor_execute)
 
 
 def _async_url(url: str) -> str:

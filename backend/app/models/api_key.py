@@ -2,6 +2,7 @@ from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from ..core.db import Base
+from .base import pk_column
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
@@ -14,7 +15,7 @@ class ApiKey(Base):
         Index('idx_api_key_expires_at', 'expires_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = pk_column()
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Key 名称")
     key_prefix: Mapped[str] = mapped_column(String(20), nullable=False, comment="Key 前缀")

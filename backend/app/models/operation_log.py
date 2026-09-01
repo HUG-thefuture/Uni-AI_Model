@@ -2,6 +2,7 @@ from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from ..core.db import Base
+from .base import pk_column
 
 from sqlalchemy import JSON  # 必须引入 JSON 类型
 
@@ -17,7 +18,7 @@ class OperationLog(Base):
         Index('idx_oplog_resource', 'resource_type', 'resource_id'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = pk_column()
     user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="逻辑外键 users.id，可为空（系统操作）")
     action: Mapped[str] = mapped_column(String(50), nullable=False, comment="动作名称")
     resource_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="资源类型")

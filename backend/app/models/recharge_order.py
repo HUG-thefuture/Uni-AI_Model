@@ -2,6 +2,7 @@ from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from ..core.db import Base
+from .base import pk_column
 
 
 class RechargeOrder(Base):
@@ -15,7 +16,7 @@ class RechargeOrder(Base):
         Index('idx_recharge_status_created', 'status', 'created_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = pk_column()
     order_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, comment="业务订单号")
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="充值金额(分)")

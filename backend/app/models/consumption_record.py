@@ -2,6 +2,7 @@ from sqlalchemy import BigInteger, Integer, DateTime, func, String, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
 from ..core.db import Base
+from .base import pk_column
 
 
 class ConsumptionRecord(Base):
@@ -18,7 +19,7 @@ class ConsumptionRecord(Base):
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = pk_column()
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
     task_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 ai_tasks.id")
     model_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 models.id")
