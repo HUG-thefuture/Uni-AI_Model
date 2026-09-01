@@ -83,7 +83,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 
 def init_db() -> None:
     """建表(注册全部模型映射)。"""
-    from app.models import ai_call_log, ai_task, model, user  # noqa: F401 注册映射
+    from app.models import ai_call_log, ai_task, model, user,api_key,consumption_record,operation_log,recharge_order  # noqa: F401 注册映射
 
     Base.metadata.create_all(bind=engine)
 
