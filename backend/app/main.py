@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
-from app.routers import auth,wallet
+from app.routers import auth,wallet,user
 from fastapi.middleware.cors import CORSMiddleware
 
 from schemas import stats
@@ -47,8 +47,8 @@ def create_app() -> FastAPI:
     # 注册接口:POST /api/auth/register
     app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(wallet.router, prefix=settings.api_prefix)
-
     app.include_router(stats.router, prefix=settings.api_prefix)
+    app.include_router(user.router, prefix=settings.api_prefix)
     return app
 
 
