@@ -25,3 +25,22 @@ class WalletResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+
+
+class WalletRecordItem(BaseModel):
+    type: str  # 类型：'recharge'(充值) 或 'consumption'(消费)
+    order_no: str  # 关联的订单号或任务ID
+    amount: int  # 变动金额（正数=进账，负数=支出）
+    status: str  # 状态：'paid' / 'success' / 'failed'
+    created_at: datetime  # 发生时间
+
+    class Config:
+        from_attributes = True
+
+
+# 分页响应模型
+class WalletRecordsResponse(BaseModel):
+    list: list[WalletRecordItem]
+    total: int
+    page: int
+    page_size: int
