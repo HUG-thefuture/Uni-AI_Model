@@ -3,8 +3,8 @@
   'use strict';
 
   const config = window.PortalConfig = Object.assign({
-    apiBase: '',
-    demoMode: true,
+    apiBase: 'http://127.0.0.1:8000',
+    demoMode: false,
     tokenKey: 'ai_portal_token',
     loginUrl: 'auth.html'
   }, window.PortalConfig || {});
