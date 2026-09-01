@@ -1,7 +1,7 @@
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.consumption_record import ConsumptionRecord
+from app.models.consumption_record import ConsumptionRecord
 
 
 async def get_stats_usage(db:AsyncSession,user_id:int)->dict:

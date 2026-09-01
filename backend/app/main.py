@@ -13,10 +13,10 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
-from app.routers import auth,wallet,user
+from app.routers import auth,wallet,user,stats
 from fastapi.middleware.cors import CORSMiddleware
 
-from schemas import stats
+
 
 
 def create_app() -> FastAPI:
