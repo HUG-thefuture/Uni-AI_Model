@@ -4,9 +4,9 @@ from sqlalchemy import select,update,func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-from models.consumption_record import ConsumptionRecord
-from models.recharge_order import RechargeOrder
-from models.user import Wallet
+from ..models.consumption_record import ConsumptionRecord
+from ..models.recharge_order import RechargeOrder
+from ..models.user import Wallet
 
 
 def create_order_no()->str:
@@ -28,11 +28,12 @@ async def recharge_order(db:AsyncSession,user_id:int,amount:int):
     new_order=RechargeOrder(order_no=order_no,user_id=user_id,amount=amount,
                             points=amount,payment_method='mock',status='paid',created_at=datetime.now())
     stmt=await get_wallet(user_id,db)
+    db.add(new_order)
     stmt.balance+=amount
     stmt.total_recharged+=amount
     await db.commit()
-    await db.refresh(stmt)
-    return stmt
+    await db.refresh(new_order)
+    return new_order
 
 async def get_user_records(db:AsyncSession,user_id:int,page:int=1,page_size:int=10)->dict:
     offset=(page-1)*page_size
