@@ -21,5 +21,5 @@
 ## 联调约定
 
 - 统一响应以 `code === 0` 代表成功，令牌保存键为 `ai_portal_token`。
-- 页面通过 `window.PortalConfig` 配置 `apiBase`、`demoMode`、`loginUrl`；默认使用演示模式。
+- 页面通过 `window.PortalConfig` 配置 `apiBase`、`demoMode`、`loginUrl`；当前仓库默认走真实认证接口，离线验收时再显式开启演示模式。
 - 接口返回401时清除本地令牌并跳转登录页；仅允许回到门户内已知页面，避免开放跳转。

@@ -6,6 +6,7 @@
     apiBase: 'http://127.0.0.1:8000',
     demoMode: false,
     tokenKey: 'ai_portal_token',
+    userKey: 'ai_portal_user',
     loginUrl: 'auth.html'
   }, window.PortalConfig || {});
 
@@ -13,9 +14,32 @@
     return sessionStorage.getItem(config.tokenKey) || localStorage.getItem(config.tokenKey) || '';
   }
 
+  function clearUserSnapshot() {
+    sessionStorage.removeItem(config.userKey);
+    localStorage.removeItem(config.userKey);
+  }
+
+  function currentUserSnapshot() {
+    try {
+      const raw = sessionStorage.getItem(config.userKey) || localStorage.getItem(config.userKey) || '';
+      const value = raw ? JSON.parse(raw) : null;
+      return value && typeof value === 'object' ? value : null;
+    } catch (error) {
+      clearUserSnapshot();
+      return null;
+    }
+  }
+
+  function setCurrentUser(value, persistent) {
+    if (!value || typeof value !== 'object') return;
+    clearUserSnapshot();
+    (persistent ? localStorage : sessionStorage).setItem(config.userKey, JSON.stringify(value));
+  }
+
   function clearToken() {
     sessionStorage.removeItem(config.tokenKey);
     localStorage.removeItem(config.tokenKey);
+    clearUserSnapshot();
   }
 
   function notifyUnauthorized(detail) {
@@ -88,6 +112,8 @@
     request,
     token,
     clearToken,
+    currentUserSnapshot,
+    setCurrentUser,
     isDemo() {
       return Boolean(config.demoMode);
     },

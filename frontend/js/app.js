@@ -3,7 +3,7 @@
   'use strict';
 
   // 联调时由成员2、4提供真实地址；演示模式不会向任何第三方模型厂商发送请求。
-  window.PortalConfig = Object.assign({ apiBase: '', demoMode: true, loginUrl: 'auth.html' }, window.PortalConfig || {});
+  window.PortalConfig = Object.assign({ apiBase: 'http://127.0.0.1:8000', demoMode: false, loginUrl: 'auth.html' }, window.PortalConfig || {});
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
   const routeTitles = {
@@ -32,7 +32,7 @@
     busy: { text: false, image: false, audio: false, video: false, profile: false }
   };
 
-  let user = { name: 'Doum', initial: 'D', balance: '5.00', school: '四川高校', realName: '已认证' };
+  let user = { name: '用户', initial: 'U', balance: '—', school: '未加载学校', realName: '未认证', role: 'user' };
   const navItems = [
     ['home', '首页', 'layui-icon-home'], ['models', '模型广场', 'layui-icon-app'],
     ['text', '文本交互舱', 'layui-icon-dialogue'], ['image', '图像生成室', 'layui-icon-picture'],
@@ -72,6 +72,21 @@
     return normalized || fallback;
   }
 
+  function applyCurrentUser(profile) {
+    if (!profile || typeof profile !== 'object') return;
+    const source = profile.user && typeof profile.user === 'object' ? profile.user : profile;
+    const details = profile.profile && typeof profile.profile === 'object' ? profile.profile : {};
+    const wallet = profile.wallet && typeof profile.wallet === 'object' ? profile.wallet : {};
+    const name = normalizeText(details.nickname || source.username, '用户', 30);
+    user = {
+      name,
+      initial: Array.from(name)[0].toUpperCase(),
+      balance: Number.isFinite(Number(wallet.balance)) ? (Number(wallet.balance) / 100).toFixed(2) : '—',
+      school: normalizeText(source.school, '未填写学校', 100),
+      realName: Number(source.real_auth_status) === 1 ? '已认证' : '未认证',
+      role: source.role === 'admin' ? 'admin' : 'user'
+    };
+  }
   function hydrateDemoState() {
     if (!window.PortalConfig.demoMode) return;
     try {
@@ -204,7 +219,7 @@
             <button class="user-menu" id="account-menu-button" type="button" aria-label="打开账户菜单" aria-haspopup="menu" aria-controls="account-menu-popup" aria-expanded="false"><span class="avatar">${escapeHtml(user.initial)}</span><span>${escapeHtml(user.name)}</span>${icon('layui-icon-down')}</button>
             <div class="account-menu" id="account-menu-popup" role="menu" aria-labelledby="account-menu-button" hidden>
               <div class="account-menu-summary" role="presentation"><span class="avatar account-menu-avatar">${escapeHtml(user.initial)}</span><span class="account-menu-copy"><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.school)} · 学生用户</small></span></div>
-              <div class="account-menu-meta" role="presentation"><span>${icon('layui-icon-vercode')} 已认证</span><span>余额 ¥${escapeHtml(user.balance)}</span></div>
+                            <div class="account-menu-meta" role="presentation"><span>${icon('layui-icon-vercode')} ${escapeHtml(user.realName)}</span><span>余额 ¥${escapeHtml(user.balance)}</span></div>
               <div class="account-menu-divider" role="separator"></div>
               <button class="account-menu-item" type="button" role="menuitem" data-route="profile">${icon('layui-icon-user')}<span>个人中心</span></button>
               <button class="account-menu-item" type="button" role="menuitem" data-route="tasks">${icon('layui-icon-list')}<span>创作历史</span></button>
@@ -330,13 +345,27 @@
   }
 
   function profileView() {
+    const verified = user.realName === '已认证';
+    const roleLabel = user.role === 'admin' ? '管理员' : '普通用户';
+    const modelCount = window.PortalConfig.demoMode ? '3' : '—';
     return `${pageHead('个人中心', '查看实名认证状态、账户概况和个人资料。')}
-      <section class="profile-grid"><article class="panel panel-pad profile-card"><div class="profile-avatar">${escapeHtml(user.initial)}</div><h2 class="profile-name">${escapeHtml(user.name)}</h2><p>${escapeHtml(user.school)} · 学生用户</p><span class="status-tag success">${icon('layui-icon-vercode')} 已完成实名认证</span><div class="metric-row"><div class="metric"><strong>¥${escapeHtml(user.balance)}</strong><span>账户余额</span></div><div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div><div class="metric"><strong>3</strong><span>可用模型</span></div></div></article><section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="已完成认证" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="普通用户" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包、账单、充值和发票将由成员4模块提供真实数据接口。当前页面仅展示成员3负责的统一门户入口。</div></div></section></section>`;
+      <section class="profile-grid"><article class="panel panel-pad profile-card"><div class="profile-avatar">${escapeHtml(user.initial)}</div><h2 class="profile-name">${escapeHtml(user.name)}</h2><p>${escapeHtml(user.school)} · ${escapeHtml(roleLabel)}</p><span class="status-tag ${verified ? 'success' : 'pending'}">${icon('layui-icon-vercode')} ${escapeHtml(user.realName)}</span><div class="metric-row"><div class="metric"><strong>¥${escapeHtml(user.balance)}</strong><span>账户余额</span></div><div class="metric"><strong>${state.imageHistory.length + state.audioHistory.length + state.videoHistory.length}</strong><span>创作次数</span></div><div class="metric"><strong>${modelCount}</strong><span>可用模型</span></div></div></article><section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="${escapeHtml(user.realName)}" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="${escapeHtml(roleLabel)}" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包、账单、充值和发票将由成员4模块提供真实数据接口。当前页面仅展示成员3负责的统一门户入口。</div></div></section></section>`;
   }
 
   function viewFor(route) {
     const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView };
     return (views[route] || homeView)();
+  }
+  function loadCurrentUser() {
+    if (!window.PortalApi || window.PortalApi.config.demoMode) return Promise.resolve();
+    const cached = window.PortalApi.currentUserSnapshot();
+    if (cached) applyCurrentUser(cached);
+    if (!window.PortalApi.token()) return Promise.resolve();
+    return window.PortalApi.currentUser().then(profile => {
+      applyCurrentUser(profile);
+      const persistent = Boolean(localStorage.getItem(window.PortalApi.config.tokenKey));
+      window.PortalApi.setCurrentUser(profile, persistent);
+    }).catch(() => cached || null);
   }
   function render() {
     state.route = currentRoute();
@@ -507,5 +536,5 @@
   hydrateDemoState();
   resumeDemoTasks();
   $(window).on('hashchange', render);
-  $(render);
+  $(function () { loadCurrentUser().finally(render); });
 }());
