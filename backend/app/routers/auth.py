@@ -39,8 +39,6 @@ async def me(current_user: User = Depends(get_current_user),
     profile = await db.scalar(select(UserProfile).where(UserProfile.user_id == current_user.id))
     wallet = await db.get(Wallet,current_user.id)
     data = User_out.model_validate(current_user).model_dump(mode="json")
-    data = ({
-        "profile":Profile_res.model_validate(profile).model_dump(mode="json") if profile else {},
-        "wallet": WalletResponse.model_validate(wallet).model_dump(mode="json") if wallet else {}
-    })
+    data["profile"] = Profile_res.model_validate(profile).model_dump(mode="json") if profile else {}
+    data["wallet"] = WalletResponse.model_validate(wallet).model_dump(mode="json") if wallet else {}
     return ok(data)

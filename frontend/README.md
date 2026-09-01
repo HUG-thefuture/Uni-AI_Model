@@ -30,7 +30,7 @@ python -m http.server 4174 --bind 127.0.0.1 --directory frontend
 
 ## 当前演示模式
 
-`js/api.js`中的 `demoMode` 默认为 `true`。演示模式具备：
+`js/api.js`中的 `demoMode` 默认关闭，登录后使用真实认证接口；需要离线验收时显式设为 `true`。演示模式具备：
 
 - 图像、声音、视频任务的待处理、处理中、成功、失败状态；
 - 任务记录和个人资料本地持久化，刷新页面后仍保留；
