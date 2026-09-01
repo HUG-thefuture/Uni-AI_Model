@@ -25,3 +25,13 @@ class Login_req(BaseModel):
     """登录请求。"""
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=64)
+
+class Profile_res(BaseModel):
+    nickname: str | None = None
+    avatar_url: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    major: str | None = None
+    bio: str | None = None
+
+    model_config = {"from_attributes": True}

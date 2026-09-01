@@ -1,13 +1,15 @@
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint
+from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint, func
 from fastapi import  Depends
 from app.core.response import APIError
 from app.core.security import decode_token
 from app.models.base import TimestampMixin, pk_column
 from app.core.db import Base, get_async_db
 from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
+
+
 
 class User(TimestampMixin, Base):
     """用户主表:登录身份、角色、启用状态。"""
@@ -39,6 +41,9 @@ class User(TimestampMixin, Base):
     school: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="学校")
 
 
+
+
+
 class UserProfile(TimestampMixin, Base):
     """用户资料表:user_id 唯一,一对一。"""
 
@@ -57,26 +62,43 @@ class UserProfile(TimestampMixin, Base):
     major: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="专业")
     bio: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="简介")
 
-
-class Wallet(TimestampMixin, Base):
-    """钱包表:user_id 为主键,注册时余额 0。"""
-
+class Wallet(TimestampMixin,Base):
     __tablename__ = "wallets"
-    __table_args__ = {"comment": "钱包表(金额单位:分,整数)"}
+    __table_args__ = (
+        # 表级别参数：指定 InnoDB 引擎和 utf8mb4 字符集（宝塔环境通用）
+        {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
+    )
+    # 逻辑外键，直接作为主键
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, comment="逻辑外键 users.id")
+    # 金额单位为“分”，所以用 Integer 或 BigInteger
+    balance: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="可用余额(分)")
+    total_recharged: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="累计充值金额(分)")
+    total_consumed: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="累计消费金额(分)")
+    # 乐观锁版本号，防并发扣减
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="乐观锁版本号")
 
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, comment="主键,逻辑外键 users.id")
-    balance: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(分)"
-    )
-    total_recharged: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="累计充值(分)"
-    )
-    total_consumed: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="累计消费(分)"
-    )
-    version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0", comment="乐观锁版本号"
-    )
+    # created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
+    # updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(),
+    #                                              comment="更新时间")
+# class Wallet(TimestampMixin, Base):
+#     """钱包表:user_id 为主键,注册时余额 0。"""
+#
+#     __tablename__ = "wallets"
+#     __table_args__ = {"comment": "钱包表(金额单位:分,整数)"}
+#
+#     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, comment="主键,逻辑外键 users.id")
+#     balance: Mapped[int] = mapped_column(
+#         BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(分)"
+#     )
+#     total_recharged: Mapped[int] = mapped_column(
+#         BigInteger, nullable=False, default=0, server_default="0", comment="累计充值(分)"
+#     )
+#     total_consumed: Mapped[int] = mapped_column(
+#         BigInteger, nullable=False, default=0, server_default="0", comment="累计消费(分)"
+#     )
+#     version: Mapped[int] = mapped_column(
+#         Integer, nullable=False, default=0, server_default="0", comment="乐观锁版本号"
+#     )
 
 
 

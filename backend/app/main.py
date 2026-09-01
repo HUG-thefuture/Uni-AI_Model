@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
 from app.routers import auth
-
+from fastapi.middleware.cors import CORSMiddleware
 
 def create_app() -> FastAPI:
     settings = get_settings()  # 必填环境变量缺失时在此抛出,启动即失败
@@ -25,6 +25,14 @@ def create_app() -> FastAPI:
     )
 
     app = FastAPI(title="AI 大模型门户", version="0.1.0", docs_url=f"{settings.api_prefix}/docs")
+    #CORS:前后端分离联调
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(RequestIdMiddleware)
     register_exception_handlers(app)
 
