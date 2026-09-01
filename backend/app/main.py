@@ -13,8 +13,11 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
-from app.routers import auth
+from app.routers import auth,wallet
 from fastapi.middleware.cors import CORSMiddleware
+
+
+
 
 def create_app() -> FastAPI:
     settings = get_settings()  # 必填环境变量缺失时在此抛出,启动即失败
@@ -43,7 +46,7 @@ def create_app() -> FastAPI:
 
     # 注册接口:POST /api/auth/register
     app.include_router(auth.router, prefix=settings.api_prefix)
-
+    app.include_router(wallet.router, prefix=settings.api_prefix)
     return app
 
 
