@@ -37,7 +37,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[
             "http://127.0.0.1:63342",
-            "http://localhost:63342"
+            "http://localhost:63342",
+            "http://127.0.0.1:4174",
+            "http://localhost:4174",
         ],
         allow_credentials=True,
         allow_methods=["*"],
