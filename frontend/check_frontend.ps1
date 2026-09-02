@@ -55,6 +55,12 @@ try {
   $appScript = Get-Content -LiteralPath (Join-Path $frontend 'js/app.js') -Raw
   $profilePersists = $appScript.Contains('window.PortalApi.updateProfile(')
   Add-Result 'profile_persistence_call' $profilePersists $(if ($profilePersists) { 'Profile form calls the real update API' } else { 'Profile form does not call PortalApi.updateProfile' })
+  $realModeGuard = $appScript.Contains('真实创作接口尚未接入') -and
+    $appScript.Contains("state.busy.image || !window.PortalConfig.demoMode") -and
+    $appScript.Contains("state.busy.audio || !window.PortalConfig.demoMode") -and
+    $appScript.Contains("state.busy.video || !window.PortalConfig.demoMode") -and
+    $appScript.Contains("if (!record) { state.busy.image = false; return; }")
+  Add-Result 'real_mode_no_fake_actions' $realModeGuard $(if ($realModeGuard) { 'Real mode blocks local fake image/audio/video task success' } else { 'Real mode fake task guard is missing' })
 
   $textFiles = Get-ChildItem -LiteralPath $frontend -Recurse -File | Where-Object { $_.Extension -in '.html', '.js', '.css', '.md' }
   $conflictMarkers = @($textFiles | Select-String -Pattern '^(<<<<<<<|=======|>>>>>>>)' -ErrorAction SilentlyContinue)

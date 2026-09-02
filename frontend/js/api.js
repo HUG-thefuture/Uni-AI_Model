@@ -153,11 +153,20 @@
     models(params) {
       return request({ url: `/api/models${params ? `?${$.param(params)}` : ''}` });
     },
+    chatSession(payload) {
+      return request({ url: '/api/chat/sessions', method: 'POST', data: payload });
+    },
     task(type, payload) {
       return request({ url: `/api/tasks/${type}`, method: 'POST', data: payload, timeout: type === 'text' ? 120000 : 30000 });
     },
+    taskList(params) {
+      return request({ url: `/api/tasks` + (params ? `?${$.param(params)}` : '') });
+    },
     taskDetail(id) {
       return request({ url: `/api/tasks/${encodeURIComponent(id)}` });
+    },
+    taskRetry(id) {
+      return request({ url: `/api/tasks/${encodeURIComponent(id)}/retry`, method: 'POST' });
     }
   };
 }());
