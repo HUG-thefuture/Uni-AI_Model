@@ -14,10 +14,26 @@ CREATE TABLE IF NOT EXISTS users (
   real_auth_status TINYINT         NOT NULL DEFAULT 0 COMMENT '0 未认证 1 已认证 2 审核中',
   school           VARCHAR(100)    DEFAULT NULL COMMENT '学校',
   created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_username (username),
   KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户主表';
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '用户资料主键',
+  user_id     BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',
+  nickname    VARCHAR(50)     DEFAULT NULL COMMENT '昵称',
+  avatar_url  VARCHAR(255)    DEFAULT NULL COMMENT '头像地址',
+  phone       VARCHAR(20)     DEFAULT NULL COMMENT '手机号',
+  email       VARCHAR(100)    DEFAULT NULL COMMENT '邮箱',
+  major       VARCHAR(100)    DEFAULT NULL COMMENT '专业',
+  bio         VARCHAR(500)    DEFAULT NULL COMMENT '个人简介',
+  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户资料表';
 
 CREATE TABLE IF NOT EXISTS wallets (
   user_id         BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',

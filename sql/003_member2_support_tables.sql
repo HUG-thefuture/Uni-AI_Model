@@ -27,19 +27,19 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   KEY idx_msg_session_created (session_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='对话消息表';
 
-CREATE TABLE IF NOT EXISTS api_keys (
-  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id     BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',
-  name        VARCHAR(100)    NOT NULL COMMENT 'Key 名称',
-  key_prefix  VARCHAR(16)     NOT NULL COMMENT '明文前缀 sk-xxxxxx',
-  key_hash    VARCHAR(64)     NOT NULL COMMENT 'sha256(明文),不存明文',
-  status      VARCHAR(20)     NOT NULL DEFAULT 'enabled' COMMENT 'enabled / disabled',
-  use_count   BIGINT          NOT NULL DEFAULT 0,
-  expires_at  DATETIME        DEFAULT NULL,
-  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_key_hash (key_hash)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='开放平台 API Key';
+-- CREATE TABLE IF NOT EXISTS api_keys (
+--   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+--   user_id     BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',
+--   name        VARCHAR(100)    NOT NULL COMMENT 'Key 名称',
+--   key_prefix  VARCHAR(16)     NOT NULL COMMENT '明文前缀 sk-xxxxxx',
+--   key_hash    VARCHAR(64)     NOT NULL COMMENT 'sha256(明文),不存明文',
+--   status      VARCHAR(20)     NOT NULL DEFAULT 'enabled' COMMENT 'enabled / disabled',
+--   use_count   BIGINT          NOT NULL DEFAULT 0,
+--   expires_at  DATETIME        DEFAULT NULL,
+--   created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--   PRIMARY KEY (id),
+--   UNIQUE KEY uk_key_hash (key_hash)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='开放平台 API Key';
 
 CREATE TABLE IF NOT EXISTS api_usage_logs (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
