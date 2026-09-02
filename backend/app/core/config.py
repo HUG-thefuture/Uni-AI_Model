@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     secret_key: str
 
     # --- 模型密钥(选填,懒校验) ---
-    siliconflow_api_key: str = ""
+    siliconflow_api_key: str = "sk-arvbgrlviwgvyqyzwjwthjolqasfgiisftazipvhcnvmloqs"
     ollama_base_url: str = "http://localhost:11434"
 
     # --- Provider 超时与重试 ---

@@ -1,6 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.api_key import ApiKey
+from ..models.api_key import ApiKey
 import secrets
 import hashlib
 
