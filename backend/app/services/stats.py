@@ -21,7 +21,7 @@ async def get_stats_usage(db: AsyncSession, user_id: int) -> dict:
     )
 
     total_tokens = 0
->>>>>>> Stashed changes
+
 
     return {
         "total_call": total_call or 0,
