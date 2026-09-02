@@ -4,19 +4,20 @@ from fastapi import APIRouter, Depends,Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.db import get_async_db
-from core.deps import require_admin
-from core.response import APIError
-from models.invoice import Invoice
+from app.core.db import get_async_db
+from app.core.deps import require_admin
+from app.core.response import APIError
+from app.models.invoice import Invoice
 
-from services import admin_wallet
+from app.services import admin_wallet
+from app.schemas.admin_wallet import AdminPaginatedResponse, AdminStatsResponse
 
 router = APIRouter(
     prefix="/admin",
     tags=["管理员"],
 )
 
-@router.get("/wallets")
+@router.get("/wallets",response_model=AdminPaginatedResponse)
 async def get_admin_wallets(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -26,7 +27,7 @@ async def get_admin_wallets(
 ):
     return await admin_wallet.get_admin_wallets(db, page, page_size, keyword)
 
-@router.get("/orders")
+@router.get("/orders", response_model=AdminPaginatedResponse)
 async def get_admin_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -37,7 +38,7 @@ async def get_admin_orders(
     return await admin_wallet.get_admin_orders(db, page, page_size, status)
 
 
-@router.get("/consumption-records")
+@router.get("/consumption-records", response_model=AdminPaginatedResponse)
 async def get_admin_consumption(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -47,7 +48,7 @@ async def get_admin_consumption(
 ):
     return await admin_wallet.get_admin_consumption(db, page, page_size, user_id)
 
-@router.get("/invoices")
+@router.get("/invoices", response_model=AdminPaginatedResponse)
 
 async def get_admin_invoices(
         page: int = Query(1, ge=1),
@@ -82,7 +83,7 @@ async def update_invoice_status(
 
 
 
-@router.get("/stats/usage")
+@router.get("/stats/usage", response_model=AdminStatsResponse)
 async def get_admin_usage_stats(
     db: AsyncSession = Depends(get_async_db),
     admin = Depends(require_admin)
