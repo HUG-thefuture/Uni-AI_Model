@@ -14,9 +14,9 @@ from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
 
-from app.routers import (
-    admin_users, api_key, auth, chat, models, stats, tasks, user, wallet,admin_wallet
-)
+
+from app.routers import (admin_users, api_key, auth, chat, models, stats, tasks, user, wallet,admin_wallet)
+
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -35,8 +35,11 @@ def create_app() -> FastAPI:
     #CORS:前后端分离联调
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
+        allow_origins=[
+            "http://127.0.0.1:63342",
+            "http://localhost:63342"
+        ],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
