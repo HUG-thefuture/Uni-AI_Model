@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.response import APIError
-from services import api_key
-from core.db import get_db
-from models.user import get_current_user
-from schemas.api_key import ApiKeyCreate,ApiKeyCreateResponse, ApiKeyListResponse, ApiKeyStatusUpdate
+from app.core.response import APIError
+from app.services import api_key
+from app.core.db import get_db
+from app.models.user import get_current_user
+from app.schemas.api_key import ApiKeyCreate,ApiKeyCreateResponse, ApiKeyListResponse, ApiKeyStatusUpdate
 
 router = APIRouter(
     prefix="/api/api_keys",

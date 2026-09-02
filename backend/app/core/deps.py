@@ -6,7 +6,7 @@
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-
+from app.models.user import get_current_user
 import jwt as pyjwt
 
 from .db import get_db
