@@ -16,5 +16,7 @@ async def profile(
         db:AsyncSession = Depends(get_async_db)
 ):
     profile = await user_service.update_profile(db, current_user.id, payload)
-    return ok(Profile_res.model_validate(profile).model_dump(mode="json"))
+    data = Profile_res.model_validate(profile).model_dump(mode="json")
+    data["school"] = current_user.school
+    return ok(data)
 

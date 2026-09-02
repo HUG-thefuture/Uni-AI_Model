@@ -593,7 +593,48 @@
         toast(error && error.message ? error.message : '充值失败，请稍后重试。', 'error');
       });
     });
-    $('#profile-form').on('submit', function (event) { event.preventDefault(); const name = $('#profile-name').val().trim(); const school = $('#profile-school').val().trim(); if (!name || !school) return toast('昵称和学校不能为空。', 'error'); state.busy.profile = true; user.name = normalizeText(name, user.name, 30); user.initial = Array.from(user.name)[0].toUpperCase(); user.school = normalizeText(school, user.school, 50); state.busy.profile = false; persistDemoState(); toast('个人资料已保存到本机演示数据。', 'success'); render(); });
+    $('#profile-form').on('submit', function (event) {
+      event.preventDefault();
+      const name = normalizeText($('#profile-name').val(), '', 30);
+      const school = normalizeText($('#profile-school').val(), '', 100);
+      if (!name || !school) return toast('昵称和学校不能为空。', 'error');
+      if (window.PortalConfig.demoMode) {
+        user.name = name;
+        user.initial = Array.from(name)[0].toUpperCase();
+        user.school = school;
+        persistDemoState();
+        toast('个人资料已保存到本机演示数据。', 'success');
+        render();
+        return;
+      }
+      if (state.busy.profile) return;
+      state.busy.profile = true;
+      $('#profile-submit').prop('disabled', true).text('正在保存…');
+      window.PortalApi.updateProfile({ nickname: name, school }).then(profile => {
+        const savedName = normalizeText(profile && profile.nickname, name, 30);
+        const savedSchool = normalizeText(profile && profile.school, school, 100);
+        user.name = savedName;
+        user.initial = Array.from(savedName)[0].toUpperCase();
+        user.school = savedSchool;
+        const cached = window.PortalApi.currentUserSnapshot();
+        if (cached && typeof cached === 'object') {
+          const cachedProfile = cached.profile && typeof cached.profile === 'object' ? cached.profile : {};
+          const nextProfile = Object.assign({}, cachedProfile, profile || {}, { nickname: savedName });
+          const nextSnapshot = cached.user && typeof cached.user === 'object'
+            ? Object.assign({}, cached, { user: Object.assign({}, cached.user, { school: savedSchool }), profile: nextProfile })
+            : Object.assign({}, cached, { school: savedSchool, profile: nextProfile });
+          const persistent = Boolean(localStorage.getItem(window.PortalApi.config.tokenKey));
+          window.PortalApi.setCurrentUser(nextSnapshot, persistent);
+        }
+        state.busy.profile = false;
+        toast('昵称和学校已保存。', 'success');
+        render();
+      }).catch(error => {
+        state.busy.profile = false;
+        $('#profile-submit').prop('disabled', false).text('保存资料');
+        toast(error && error.message ? error.message : '个人资料保存失败，请稍后重试。', 'error');
+      });
+    });
   }
 
   window.addEventListener('portal:unauthorized', event => {
