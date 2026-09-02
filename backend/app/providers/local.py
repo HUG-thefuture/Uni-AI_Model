@@ -82,6 +82,8 @@ class LocalProvider(BaseProvider):
             "stream": True,
             **self.model_params(model, {"temperature": 0.7}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
         client, resp = await self._open_stream_with_retry(
             f"{self._endpoint_for(model)}/v1/chat/completions",
             # 本地服务无需鉴权:不带 Authorization,仅 Content-Type
@@ -123,6 +125,8 @@ class LocalProvider(BaseProvider):
             "stream": False,
             **self.model_params(model, {"temperature": 0.7}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
 
         def validate(resp: httpx.Response) -> None:
             if resp.status_code >= 400:

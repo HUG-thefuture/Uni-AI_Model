@@ -16,6 +16,7 @@ class ImageTaskParams(BaseModel):
     image_size: str | None = Field(default=None, description="尺寸,如 1024x1024,默认 1024x1024")
     num: int | None = Field(default=None, ge=1, le=4, description="生成数量 1..4,默认 1")
     image_url: str | None = Field(default=None, description="图生图参考图 URL(WP07 图生图预留)")
+    negative_prompt: str | None = Field(default=None, max_length=2000, description="负面提示词")
 
 
 class ImageTaskCreate(BaseModel):
@@ -54,6 +55,9 @@ class VideoTaskParams(BaseModel):
 
     resolution: str | None = Field(default=None, max_length=20, description="分辨率,如 1280x720")
     duration_sec: int | None = Field(default=None, ge=1, description="视频时长上限(秒)")
+    negative_prompt: str | None = Field(default=None, max_length=2000, description="负面提示词")
+    seed: int | None = Field(default=None, ge=0, description="随机种子")
+    image_url: str | None = Field(default=None, max_length=500, description="图生视频首帧，可来自 /uploads")
 
 
 class VideoTaskCreate(BaseModel):

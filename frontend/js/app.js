@@ -6,6 +6,7 @@
   window.PortalConfig = Object.assign({ apiBase: 'http://127.0.0.1:8000', demoMode: false, loginUrl: 'auth.html' }, window.PortalConfig || {});
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
+  let taskMonitor = null;
   const routeTitles = {
     home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
     audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心'
@@ -25,9 +26,13 @@
     imageMode: '文生图',
     imageRatio: '1:1 1024×1024',
     imageHistory: [],
+    // 预览应跟随最近一次提交，而不能依赖服务端列表的字符串时间排序。
+    activeImageTaskId: null,
     audioMode: '声音合成',
     selectedVoice: '龙安洋',
     videoDuration: '5秒',
+    videoImage: null,
+    activeVideoTaskId: null,
     audioHistory: [],
     videoHistory: [],
     tasks: [],
@@ -83,6 +88,8 @@
     };
     state[`${kind}History`].unshift(record);
     state.tasks.unshift(Object.assign({}, record));
+    if (kind === 'image') state.activeImageTaskId = String(record.id);
+    if (kind === 'video') state.activeVideoTaskId = String(record.id);
     pollTask(record);
     return record;
   }
@@ -91,9 +98,18 @@
     record.status = detail.status || record.status;
     record.error = detail.error_message || '';
     record.resultText = detail.result_text || '';
-    record.resultUrls = detail.result_urls || (detail.result_url ? [detail.result_url] : []);
+    let urls = detail.result_urls;
+    if (!urls && detail.result_url) {
+      try { urls = JSON.parse(detail.result_url); } catch (error) { urls = [detail.result_url]; }
+    }
+    record.resultUrls = Array.isArray(urls) ? urls : [];
     const mirror = state.tasks.find(item => String(item.id) === String(record.id));
     if (mirror) Object.assign(mirror, record);
+  }
+
+  function resultUrl(value) {
+    if (!value) return '';
+    return /^https?:\/\//i.test(value) ? value : `${window.PortalConfig.apiBase}${value}`;
   }
 
   function pollTask(record, retries) {
@@ -103,7 +119,8 @@
       window.PortalApi.taskDetail(record.id).then(detail => {
         applyTaskDetail(record, detail);
         if (['pending', 'processing'].includes(record.status)) pollTask(record, remaining - 1);
-        if (['image', 'audio', 'video', 'tasks'].includes(state.route)) render();
+        const formEditing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#image-form, #audio-form, #video-form');
+        if (['image', 'audio', 'video', 'tasks'].includes(state.route) && !formEditing) render();
       }).catch(error => {
         record.error = error && error.message ? error.message : '无法读取任务状态';
         if (state.route === record.kind || state.route === 'tasks') render();
@@ -121,6 +138,7 @@
         group: item.provider_type === 'local' ? '私域知识模型' : '云端模型',
         source: item.provider_type === 'local' ? '私域模型' : '云端模型',
         tag: Array.isArray(item.capability_tags) ? item.capability_tags[0] || item.model_type : item.model_type,
+        tags: Array.isArray(item.capability_tags) ? item.capability_tags : [],
         discount: item.price_per_call ? `¥${item.price_per_call}/次` : '免费',
         desc: item.description || '已接入平台模型服务。',
         tone: ['#386ee5', '#7951d4', '#2eaf91', '#bd4caf'][index % 4]
@@ -130,6 +148,46 @@
     }).catch(error => {
       toast(error && error.message ? `模型列表加载失败：${error.message}` : '模型列表加载失败，请稍后刷新。', 'error');
     });
+  }
+
+  function loadTaskHistory() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return Promise.resolve();
+    return window.PortalApi.taskList({ page: 1, page_size: 100 }).then(data => {
+      const rows = Array.isArray(data && data.items) ? data.items : [];
+      state.tasks = rows.map(item => { const record = { id: item.id, title: item.prompt || `任务 #${item.id}`, mode: item.task_type, meta: '', createdAt: item.created_at || '', status: item.status, error: item.error_message || '', resultText: item.result_text || '', resultUrls: [] }; applyTaskDetail(record, item); return record; });
+      state.imageHistory = state.tasks.filter(item => item.mode === 'image');
+      if (!state.activeImageTaskId && state.imageHistory[0]) state.activeImageTaskId = String(state.imageHistory[0].id);
+      state.audioHistory = state.tasks.filter(item => ['audio_clone', 'asr'].includes(item.mode));
+      state.videoHistory = state.tasks.filter(item => item.mode === 'video');
+      if (!state.activeVideoTaskId && state.videoHistory[0]) state.activeVideoTaskId = String(state.videoHistory[0].id);
+      startTaskMonitor();
+    }).catch(() => undefined);
+  }
+
+  function startTaskMonitor() {
+    if (taskMonitor || window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return;
+    taskMonitor = window.setInterval(() => {
+      window.PortalApi.taskList({ page: 1, page_size: 100 }).then(data => {
+        const rows = Array.isArray(data && data.items) ? data.items : [];
+        const previous = new Map(state.tasks.map(item => [String(item.id), item]));
+        rows.forEach(item => {
+          const record = previous.get(String(item.id)) || { id: item.id, title: item.prompt || `任务 #${item.id}`, mode: item.task_type, meta: '', createdAt: item.created_at || '' };
+          applyTaskDetail(record, item);
+          record.status = item.status || record.status;
+          record.error = item.error_message || '';
+          record.title = record.title || item.prompt || `任务 #${item.id}`;
+          previous.set(String(item.id), record);
+        });
+        state.tasks = Array.from(previous.values()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        state.imageHistory = state.tasks.filter(item => item.mode === 'image');
+        if (!state.activeImageTaskId && state.imageHistory[0]) state.activeImageTaskId = String(state.imageHistory[0].id);
+        state.audioHistory = state.tasks.filter(item => ['audio_clone', 'asr'].includes(item.mode));
+        state.videoHistory = state.tasks.filter(item => item.mode === 'video');
+        if (!state.activeVideoTaskId && state.videoHistory[0]) state.activeVideoTaskId = String(state.videoHistory[0].id);
+        const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#image-form, #audio-form, #video-form');
+        if (!editing && ['image', 'audio', 'video', 'tasks', 'profile'].includes(state.route)) render();
+      }).catch(() => undefined);
+    }, 3000);
   }
 
   function normalizeText(value, fallback, maxLength) {
@@ -377,9 +435,10 @@
   }
 
   function imageView() {
-    const hasResult = state.imageHistory[0] && ['succeeded', 'success'].includes(state.imageHistory[0].status);
+    const currentImage = state.imageHistory.find(item => String(item.id) === String(state.activeImageTaskId)) || state.imageHistory[0];
+    const hasResult = currentImage && ['succeeded', 'success'].includes(currentImage.status);
     return `${pageHead('图像生成室', '选择模型并输入描述词，把灵感转成可用的视觉素材。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-picture')}图像预览</h2></div><div class="preview-art ${hasResult ? 'demo-image' : ''}"><div class="preview-art-inner">${icon(hasResult ? 'layui-icon-picture' : 'layui-icon-upload-drag')}<strong>${hasResult ? '演示生成结果' : '等待生成图像'}</strong><span>${hasResult ? '接入真实图像接口后将显示服务端返回的图片。' : '提交提示词后，生成结果会在这里展示。'}</span></div></div><div class="preview-caption">${hasResult ? escapeHtml(state.imageHistory[0].title) : '尚未提交任务'}</div></div>
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-picture')}图像预览</h2></div><div class="preview-art ${hasResult ? 'demo-image' : ''}">${hasResult && currentImage.resultUrls && currentImage.resultUrls.length ? currentImage.resultUrls.map(url => `<img src="${escapeHtml(resultUrl(url))}" alt="${escapeHtml(currentImage.title)}" style="max-width:100%;max-height:420px;object-fit:contain" />`).join('') : `<div class="preview-art-inner">${icon(hasResult ? 'layui-icon-picture' : 'layui-icon-upload-drag')}<strong>${hasResult ? '图像生成完成' : currentImage ? '正在生成图像' : '等待生成图像'}</strong><span>${hasResult ? '服务端图像结果已返回。' : currentImage ? '新任务正在处理，完成后会替换当前预览。' : '提交提示词后，生成结果会在这里展示。'}</span></div>`}</div><div class="preview-caption">${hasResult && currentImage.resultUrls && currentImage.resultUrls.length ? `已返回 ${currentImage.resultUrls.length} 张图像，可右键保存。` : hasResult ? '任务完成，但服务端未返回图像地址。' : currentImage ? escapeHtml(currentImage.title) : '尚未提交任务'}</div></div>
         <form class="panel panel-pad" id="image-form"><div class="inline-model"><span>${icon('layui-icon-light')} qwen-image <small>文生图 / 图生图</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="图像生成模式"><button type="button" class="tab-btn ${state.imageMode === '文生图' ? 'active' : ''}" data-image-mode="文生图" aria-pressed="${state.imageMode === '文生图'}">文生图</button><button type="button" class="tab-btn" disabled aria-disabled="true" title="文件字段确认后开放">图生图 · 待开放</button></div><div class="form-block"><label class="field-label" for="image-prompt">输入描述词 <span class="required">*</span></label><textarea class="textarea-field" id="image-prompt" required placeholder="例如：一只可爱的橘猫在阳光下睡觉，写实风格，8K 分辨率…"></textarea></div><div class="form-block"><span class="field-label" id="image-ratio-label">图像尺寸</span><div class="ratio-row" role="group" aria-labelledby="image-ratio-label">${['1:1 1024×1024', '9:16 720×1280', '16:9 1280×720'].map(item => `<button type="button" class="duration-btn ${state.imageRatio === item ? 'active' : ''}" data-ratio="${item}" aria-pressed="${state.imageRatio === item}">${item}</button>`).join('')}</div></div><div class="advanced"><div class="form-grid"><div><label class="field-label" for="image-count">生成数量</label><select class="select-field" id="image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></div><div><label class="field-label" for="image-negative">负面提示词</label><input id="image-negative" class="field" placeholder="模糊、低质量、变形…" /></div></div></div><button class="btn-primary wide-action" id="image-submit" type="submit" ${state.busy.image || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.image ? '正在提交…' : (window.PortalConfig.demoMode ? '立即生成' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '演示记录会保存在本机；提示词包含“#失败”可验证失败与重试。' : '真实图像接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}生成历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">提示词</th><th scope="col">类型</th><th scope="col">尺寸</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.imageHistory, '生成')}</tbody></table></div></section>`;
   }
@@ -389,17 +448,18 @@
     const complete = state.audioHistory[0] && ['succeeded', 'success'].includes(state.audioHistory[0].status);
     const voices = [['龙安洋', '阳光大男孩 · 中英双语'], ['龙安欢', '欢脱元气女 · 中英双语'], ['清雅老师', '知性女声 · 普通话'], ['星河少年', '沉稳男声 · 普通话']];
     return `${pageHead('声音创作坊', '将文字转成自然语音，并保留每一次创作的任务记录。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${complete ? '演示任务已完成；真实音频接入后可播放。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? `<div class="audio-player"><button class="player-button" type="button" disabled title="真实音频地址接入后可播放">${icon('layui-icon-play')}</button><div class="wave">${Array.from({length:42}, () => '<i></i>').join('')}</div><span>00:18</span></div>` : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${complete ? '服务端音频结果已返回，可直接播放或下载。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? (state.audioHistory[0].resultUrls && state.audioHistory[0].resultUrls[0] ? `<audio controls preload="metadata" src="${escapeHtml(resultUrl(state.audioHistory[0].resultUrls[0]))}"></audio>` : '任务完成，但服务端未返回音频地址。') : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
         <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} cosyvoice-v3-plus <small>¥1.2 / 万字符</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="声音创作模式">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" aria-pressed="${state.audioMode === item}" ${item === '声音合成' ? `data-audio-mode="${item}"` : 'disabled aria-disabled="true" title="接口字段确认后开放"'}>${item}${item === '声音合成' ? '' : ' · 待开放'}</button>`).join('')}</div><div class="form-block"><label class="field-label" for="audio-text">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" aria-describedby="audio-count" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count" aria-live="polite">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label" for="audio-speed">语速</label><input class="field" id="audio-speed" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label" for="audio-format">音频格式</label><select class="select-field" id="audio-format"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><span class="field-label" id="voice-label">选择配音员</span><div class="audio-voice-grid" role="group" aria-labelledby="voice-label">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}" aria-pressed="${state.selectedVoice === name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div><button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : (window.PortalConfig.demoMode ? '生成音频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '文本包含“#失败”可验证失败任务和重新提交。' : '真实声音接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">模式</th><th scope="col">时长/字数</th><th scope="col">完成时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.audioHistory, '创作')}</tbody></table></div></section>`;
   }
 
   function videoView() {
-    const current = state.videoHistory[0];
+    const current = state.videoHistory.find(item => String(item.id) === String(state.activeVideoTaskId)) || state.videoHistory[0];
     const running = current && ['pending', 'processing'].includes(current.status);
     const complete = current && ['succeeded', 'success'].includes(current.status);
+    const failed = current && current.status === 'failed';
     return `${pageHead('视频合成站', '以文本、图片或音频条件组合成一段可控的短视频。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview"><div class="preview-art-inner">${icon(complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${complete ? '演示模式下可展示预生成素材；正式接口会返回视频地址。' : '生成完成后将在此显示结果。'}</span></div></div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? escapeHtml(current.title) : '无首帧时将采用文生视频模型。'}</div></div>
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview">${complete && current.resultUrls && current.resultUrls[0] ? `<video controls preload="metadata" src="${escapeHtml(resultUrl(current.resultUrls[0]))}" style="max-width:100%;max-height:420px"></video>` : `<div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${failed ? '视频生成失败' : complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查参数后重试。') : complete ? '服务端视频结果已返回。' : '生成完成后将在此显示结果。'}</span></div>`}</div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? escapeHtml(current.title) : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : '无首帧时将采用文生视频模型。'}</div></div>
         <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} wanx2.1-vace-plus <small>视频生成</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="form-block"><label class="field-label" for="video-prompt">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label" for="video-negative">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><span class="field-label" id="video-duration-label">视频时长</span><div class="duration-row" role="group" aria-labelledby="video-duration-label">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}" aria-pressed="${state.videoDuration === item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label" for="video-resolution">分辨率</label><select class="select-field" id="video-resolution"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><span class="field-label">音频设置</span><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : (window.PortalConfig.demoMode ? '文生视频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '提示词包含“#失败”可验证失败任务和重新提交。' : '真实视频接口尚未挂载，当前不会提交或生成本地假任务。'}</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">合成模式</th><th scope="col">时长</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.videoHistory, '创作')}</tbody></table></div></section>`;
   }
@@ -408,7 +468,7 @@
     const all = [...state.videoHistory, ...state.audioHistory, ...state.imageHistory].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const action = window.PortalConfig.demoMode && all.length ? '<button type="button" class="btn-secondary" id="clear-demo-history">清空演示记录</button>' : '';
     return `${pageHead('创作历史', '集中查看你提交过的图像、声音和视频任务。', action)}
-      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-tips')}<div>${window.PortalConfig.demoMode ? '这里只展示当前登录用户的任务。任务失败时可以重新提交；正式系统会由后端保证失败任务不扣费。' : '任务列表接口尚未挂载，当前不展示服务端任务。接入后将从后端加载当前用户的任务。'}</div></div><div class="table-wrap" style="margin-top:18px" role="region" aria-label="全部创作任务表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">类型</th><th scope="col">参数</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(all, '任务')}</tbody></table></div></section>`;
+      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-tips')}<div>${window.PortalConfig.demoMode ? '这里只展示当前登录用户的任务。任务失败时可以重新提交；正式系统会由后端保证失败任务不扣费。' : '任务列表会从服务端加载，并自动轮询处理中的任务；结果地址返回后可直接预览。'}</div></div><div class="table-wrap" style="margin-top:18px" role="region" aria-label="全部创作任务表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">类型</th><th scope="col">参数</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(all, '任务')}</tbody></table></div></section>`;
   }
 
   function profileView() {
@@ -636,6 +696,41 @@
       $('#image-submit, #audio-submit, #video-submit').prop('disabled', false).removeAttr('aria-disabled').each(function () {
         $(this).html(`${icon('layui-icon-release')} ${this.id === 'video-submit' ? '文生视频' : this.id === 'audio-submit' ? '生成音频' : '立即生成'}`);
       });
+      $('#video-submit').next('.state-note').html(`${icon('layui-icon-tips')} 支持文生视频；上传首帧后自动使用图生视频模型。生成完成后可直接播放。`);
+      const videoSettings = $('#video-resolution').closest('.form-grid');
+      $('#video-resolution').html('<option value="1280x720">横屏 1280 × 720</option><option value="720x1280">竖屏 720 × 1280</option><option value="960x960">方形 960 × 960</option>');
+      videoSettings.children('div').last().html('<label class="field-label" for="video-image">视频首帧（可选）</label><input class="field" id="video-image" type="file" accept="image/png,image/jpeg" /><p class="state-note" id="video-image-status">未上传时使用文生视频模型。</p>');
+      $('#video-image').on('change', function () {
+        const file = this.files && this.files[0];
+        if (!file) return;
+        if (!/^image\/(png|jpeg)$/.test(file.type)) return toast('首帧仅支持 PNG 或 JPG 图片。', 'error');
+        $('#video-image-status').text('正在上传首帧…');
+        window.PortalApi.upload(file).then(result => {
+          state.videoImage = result.url;
+          $('#video-image-status').text(`首帧已上传：${result.filename}`);
+          toast('首帧上传成功，请选择图生视频模型后提交。', 'success');
+        }).catch(error => {
+          state.videoImage = null;
+          $('#video-image-status').text('首帧上传失败。');
+          toast(error && error.message ? error.message : '首帧上传失败。', 'error');
+        });
+      });
+      $('#image-form').off('submit').on('submit', function (event) {
+        event.preventDefault();
+        const prompt = $('#image-prompt').val().trim(); const model = currentModel('image');
+        if (!prompt) return toast('请先填写图像描述词。', 'error');
+        if (!model) return toast('当前没有可用的图像模型。', 'error');
+        state.busy.image = true;
+        window.PortalApi.task('image', { model_id: model.id, prompt, params: {
+          image_size: state.imageRatio.split(' ')[1].replace('×', 'x'),
+          num: Number($('#image-count').val()),
+          negative_prompt: $('#image-negative').val().trim() || undefined
+        }}).then(result => {
+          remoteRecord('image', result, prompt.slice(0, 22), state.imageMode, state.imageRatio);
+          toast('图像任务已提交。', 'success');
+        }).catch(error => toast(error && error.message ? error.message : '图像任务提交失败。', 'error'))
+          .finally(() => { state.busy.image = false; render(); });
+      });
       $('#audio-form').off('submit').on('submit', function (event) {
         event.preventDefault();
         const text = $('#audio-text').val().trim(); const model = currentModel('audio');
@@ -649,12 +744,15 @@
       });
       $('#video-form').off('submit').on('submit', function (event) {
         event.preventDefault();
-        const text = $('#video-prompt').val().trim(); const model = currentModel('video');
+        const text = $('#video-prompt').val().trim(); let model = currentModel('video');
         if (!text) return toast('请先描述要生成的视频内容。', 'error');
+        if (state.videoImage && !(model && Array.isArray(model.tags) && model.tags.includes('图生视频'))) {
+          model = models.find(item => item.modelType === 'video' && Array.isArray(item.tags) && item.tags.includes('图生视频')) || model;
+        }
         if (!model) return toast('当前没有可用的视频模型。', 'error');
         state.busy.video = true;
-        window.PortalApi.task('video', { model_id: model.id, text, params: { duration_sec: Number.parseInt(state.videoDuration, 10), resolution: $('#video-resolution').val().startsWith('1080') ? '1920x1080' : '1280x720' } })
-          .then(result => { remoteRecord('video', result, text.slice(0, 20), '文生视频', state.videoDuration); toast('视频任务已提交。', 'success'); })
+        window.PortalApi.task('video', { model_id: model.id, text, params: { duration_sec: Number.parseInt(state.videoDuration, 10), resolution: $('#video-resolution').val(), negative_prompt: $('#video-negative').val().trim() || undefined, image_url: state.videoImage || undefined } })
+          .then(result => { remoteRecord('video', result, text.slice(0, 20), state.videoImage ? '图生视频' : '文生视频', state.videoDuration); toast('视频任务已提交。', 'success'); })
           .catch(error => toast(error && error.message ? error.message : '视频任务提交失败。', 'error'))
           .finally(() => { state.busy.video = false; render(); });
       });
@@ -755,5 +853,5 @@
   hydrateDemoState();
   resumeDemoTasks();
   $(window).on('hashchange', render);
-  $(function () { loadCurrentUser().then(loadModels).finally(render); });
+  $(function () { loadCurrentUser().then(loadModels).then(loadTaskHistory).finally(render); });
 }());

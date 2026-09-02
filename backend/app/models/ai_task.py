@@ -36,7 +36,8 @@ class AiTask(TimestampMixin, Base):
         comment="pending / processing / succeeded / failed",
     )
     result_text: Mapped[str | None] = mapped_column(Text, nullable=True, comment="文本结果")
-    result_url: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="文件结果地址")
+    # SiliconFlow 返回的 S3 预签名 URL 可超过 500 字符；图像任务还会以 JSON 数组保存多张图片。
+    result_url: Mapped[str | None] = mapped_column(Text, nullable=True, comment="文件结果地址或地址数组 JSON")
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="失败原因(中文)")
     cost: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0",

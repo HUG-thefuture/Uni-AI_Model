@@ -201,6 +201,26 @@
     task(type, payload) {
       return request({ url: `/api/tasks/${type}`, method: 'POST', data: payload, timeout: type === 'text' ? 120000 : 30000 });
     },
+    upload(file) {
+      const currentToken = token();
+      const headers = {};
+      if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+      const form = new FormData();
+      form.append('file', file);
+      return new Promise((resolve, reject) => {
+        $.ajax({
+          url: `${config.apiBase}/api/uploads`, method: 'POST', headers, data: form,
+          processData: false, contentType: false, dataType: 'json', timeout: 60000
+        }).done(response => {
+          if (response && response.code === 0) return resolve(response.data);
+          reject({ status: 200, message: response && response.message ? response.message : '上传接口返回格式不符合约定' });
+        }).fail(xhr => {
+          const response = xhr.responseJSON || {};
+          if (xhr.status === 401) { clearToken(); notifyUnauthorized({ requestId: response.request_id }); }
+          reject({ status: xhr.status || 0, message: errorMessage(xhr.status, response.message) });
+        });
+      });
+    },
     taskList(params) {
       return request({ url: `/api/tasks` + (params ? `?${$.param(params)}` : '') });
     },
