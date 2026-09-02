@@ -360,7 +360,7 @@
     return `${pageHead('文本交互舱', '选择模型，开始一次专注的对话与创作。')}
       <section class="panel chat-layout">
         <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button type="button" class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${escapeHtml(model.name)}" aria-pressed="${state.currentChatModel === model.name}">${escapeHtml(model.name)}<small>${escapeHtml(model.tag)}</small></button>`).join('')}</div></aside>
-        <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…" aria-label="对话内容，按 Ctrl 加 Enter 发送"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
+        <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…（Enter 发送，Shift + Enter 换行）" aria-label="对话内容，按 Enter 发送，Shift 加 Enter 换行"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
         <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('')}</div></aside>
       </section>`;
   }
@@ -498,6 +498,12 @@
     persistDemoState();
     if (['image', 'audio', 'video', 'tasks', 'profile'].includes(state.route)) render();
   }
+  function streamFailureMessage(error) {
+    const detail = error && error.message ? String(error.message).trim() : '';
+    if (!detail) return '文本任务请求失败，可修改内容后重试。';
+    if (/积分不足|余额不足/.test(detail)) return `${detail}请到「个人中心 - 我的钱包」充值后再试。`;
+    return `文本任务请求失败：${detail}`;
+  }
   function sendChat() {
     const input = $('#chat-input'); const prompt = input.val().trim();
     if (!prompt) return toast('请输入问题或指令后再发送。', 'error');
@@ -526,7 +532,7 @@
       state.chatHistory.unshift({ title: prompt.slice(0, 18) + (prompt.length > 18 ? '…' : ''), date: '刚刚' });
     }).catch(error => {
       state.chatMessages[state.chatMessages.length - 1] = { role: 'assistant', content: error && error.message ? error.message : '当前模型暂时无法响应，请稍后重试。' };
-      toast('文本任务请求失败，可修改内容后重试。', 'error');
+      toast(streamFailureMessage(error), 'error');
     }).finally(() => {
       state.busy.text = false;
       persistDemoState();
@@ -620,7 +626,14 @@
     $('[data-type]').on('click', function () { state.modelType = $(this).data('type'); render(); });
     $('#model-search').on('input', function () { state.keyword = $(this).val(); $('.models-grid').html(modelResultsHtml()); });
     $('[data-chat-model]').on('click', function () { state.currentChatModel = $(this).data('chat-model'); render(); });
-    $('#send-chat').on('click', sendChat); $('#chat-input').on('keydown', event => { if (event.ctrlKey && event.key === 'Enter') sendChat(); });
+    $('#send-chat').on('click', sendChat);
+    $('#chat-input').on('keydown', event => {
+      if (event.key !== 'Enter') return;
+      if (event.isComposing || event.keyCode === 229) return; // 输入法候选态：回车用于选词，不发送
+      if (event.shiftKey) return; // Shift + Enter 换行
+      event.preventDefault();
+      sendChat();
+    });
     $('[data-prompt]').on('click', function () { $('#chat-input').val($(this).data('prompt')).focus(); });
     $('#new-chat, #new-chat-side').on('click', () => { state.chatSessionId = null; state.chatMessages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }]; persistDemoState(); render(); });
     $('[data-image-mode]').on('click', function () { state.imageMode = $(this).data('image-mode'); render(); });
