@@ -37,7 +37,7 @@ async def recharge(recharge_data: RechargeRequest, db: AsyncSession = Depends(ge
 async def get_records(db: AsyncSession = Depends(get_async_db), current_user=Depends(get_current_user), page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页条数")):
     stmt=await wallet.get_user_records(db,current_user.id,page,page_size)
-    return ok(stmt)
+    return stmt
 
 @router.post("/invoices", response_model=InvoiceResponse)
 async def create_invoice(
