@@ -13,10 +13,12 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
-from app.routers import (
-    admin_users, api_key, auth, chat, models, stats, tasks, user, wallet,
-)
+
+
+from app.routers import (admin_users, api_key, auth, chat, models, stats, tasks, user, wallet,admin_wallet)
+
 from fastapi.middleware.cors import CORSMiddleware
+
 
 
 
@@ -33,8 +35,11 @@ def create_app() -> FastAPI:
     #CORS:前后端分离联调
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
+        allow_origins=[
+            "http://127.0.0.1:63342",
+            "http://localhost:63342"
+        ],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -52,11 +57,18 @@ def create_app() -> FastAPI:
     app.include_router(stats.router, prefix=settings.api_prefix)
     app.include_router(user.router, prefix=settings.api_prefix)
     app.include_router(api_key.router, prefix=settings.api_prefix)
+
     app.include_router(admin_users.router, prefix=settings.api_prefix)
     # 模型与创作主链路：前端调用 /models、/chat、/tasks 时由此统一挂载。
     app.include_router(models.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
     app.include_router(tasks.router, prefix=settings.api_prefix)
+
+
+  
+    app.include_router(admin_wallet.router, prefix=settings.api_prefix)
+
+
     return app
 
 

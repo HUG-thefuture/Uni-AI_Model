@@ -37,7 +37,7 @@ backend/
 cd backend
 pip install -r requirements.txt
 copy .env.example .env      # 填好 DATABASE_URL / SECRET_KEY
-python -m app.init_db       # 建成员2的三张表(MySQL) —— 全量建表见 sql/
+python -m app.init_db       # 全量自动建 14 张表(MySQL 需先建 ai_portal 库;或按 sql/README.md 执行 SQL)
 uvicorn app.main:app --reload --port 8000
 # 探针: curl http://127.0.0.1:8000/api/health
 ```
@@ -203,7 +203,8 @@ pip install -r requirements.txt
 copy .env.example .env        # Linux/macOS: cp .env.example .env
 # 编辑 .env:必填 DATABASE_URL / SECRET_KEY;联调线上模型填 SILICONFLOW_API_KEY
 
-# 4. 初始化数据库(幂等建表)
+# 4. 初始化数据库(幂等全量建表:users/wallets/models/chat/财务等共 14 张)
+#    前置:MySQL 中已存在 ai_portal 库(先执行 sql/000_bootstrap.sql)
 python -m app.init_db
 
 # 5. 写入 4 个种子模型(幂等 upsert:线上对话/线上文生图 + 本地 qwen2.5:3b / 1.5b)
@@ -222,7 +223,7 @@ uvicorn app.main:app --reload --port 8000
 
 | 命令 | 作用 |
 | --- | --- |
-| `python -m app.init_db` | 幂等建表(Base.metadata.create_all,已有表不受影响) |
+| `python -m app.init_db` | 幂等全量建表 14 张(模型注册不全时报错;已有表不受影响,不改结构) |
 | `python scripts/seed_models.py` | 从 `docs/model-config-template.json` 幂等写入/更新 4 个模型 |
 | `python scripts/seed_demo.py` | 演示数据(demo_user/demo_admin、钱包余额 1000、任务/会话/日志),幂等可重复执行 |
 | `python scripts/test_m_series.py` | M-01~M-08 稳定性用例,结果写 `docs/m-series-result.md` |

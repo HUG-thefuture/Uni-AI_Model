@@ -9,10 +9,10 @@ from sqlalchemy.orm import Session
 from app.models.user import get_current_user
 import jwt as pyjwt
 
-from .db import get_db
-from .response import APIError
-from .security import decode_token
-from ..models.support import User
+from app.core.db import get_db
+from app.core.response import APIError
+from app.core.security import decode_token
+from app.models.support import User
 
 _bearer = HTTPBearer(auto_error=False)
 
