@@ -8,7 +8,8 @@ from app.models.user import User
 from app.schemas.user import PageResult, StatusUpdateIn, UserAdminOut
 from app.services import user as user_service
 
-router = APIRouter(prefix="/admin/users", tags=["管理端-用户"])
+router = APIRouter(prefix="/admin/users",
+                   tags=["管理端-用户"])
 
 
 @router.get("")
