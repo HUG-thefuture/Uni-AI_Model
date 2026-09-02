@@ -619,7 +619,7 @@
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });
     $('[data-type]').on('click', function () { state.modelType = $(this).data('type'); render(); });
     $('#model-search').on('input', function () { state.keyword = $(this).val(); $('.models-grid').html(modelResultsHtml()); });
-    $('[data-chat-model]').on('click', function () { state.currentChatModel = $(this).data('chat-model'); render(); });
+    $('[data-chat-model]').on('click', function () { state.currentChatModel = $(this).data('chat-model'); state.chatSessionId = null; render(); });
     $('#send-chat').on('click', sendChat); $('#chat-input').on('keydown', event => { if (event.ctrlKey && event.key === 'Enter') sendChat(); });
     $('[data-prompt]').on('click', function () { $('#chat-input').val($(this).data('prompt')).focus(); });
     $('#new-chat, #new-chat-side').on('click', () => { state.chatSessionId = null; state.chatMessages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }]; persistDemoState(); render(); });

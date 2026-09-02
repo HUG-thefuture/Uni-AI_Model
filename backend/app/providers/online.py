@@ -37,6 +37,8 @@ class OnlineProvider(BaseProvider):
             "stream": True,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
         client, resp = await self._open_stream_with_retry(
             f"{BASE_URL}/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -81,6 +83,8 @@ class OnlineProvider(BaseProvider):
             "stream": False,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
 
         def validate(resp: httpx.Response) -> None:
             if resp.status_code >= 400:

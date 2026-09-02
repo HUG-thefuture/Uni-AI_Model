@@ -8,6 +8,6 @@
  * 本文件先于 js/api.js 加载，api.js / app.js / auth.js 都会读取 window.PortalConfig。
  */
 window.PortalConfig = {
-  apiBase: 'http://127.0.0.1:8003',
+  apiBase: 'http://127.0.0.1:8004',
   demoMode: false
 };

@@ -179,14 +179,22 @@
           pending += decoder.decode(chunk.value, { stream: true });
           const frames = pending.split('\n\n');
           pending = frames.pop();
-          frames.forEach(frame => {
+          for (const frame of frames) {
             const line = frame.split('\n').find(item => item.startsWith('data:'));
-            if (!line) return;
+            if (!line) continue;
             let event;
-            try { event = JSON.parse(line.slice(5).trim()); } catch (error) { return; }
+            try { event = JSON.parse(line.slice(5).trim()); } catch (error) { continue; }
             if (event.error) throw { code: event.error.code, message: event.error.message || '模型生成失败。' };
             onEvent(event);
-          });
+          }
+        }
+        if (pending.trim()) {
+          const line = pending.split('\n').find(item => item.startsWith('data:'));
+          if (line) {
+            const event = JSON.parse(line.slice(5).trim());
+            if (event.error) throw { code: event.error.code, message: event.error.message || '模型生成失败。' };
+            onEvent(event);
+          }
         }
       });
     },

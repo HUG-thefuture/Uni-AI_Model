@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-from schemas.admin_wallet import InvoiceResponse, InvoiceCreate
+from app.schemas.admin_wallet import InvoiceResponse, InvoiceCreate
 from ..core.response import APIError, ok
 from ..models.user import get_current_user
 from ..services import wallet,admin_wallet

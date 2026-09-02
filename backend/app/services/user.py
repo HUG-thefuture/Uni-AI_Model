@@ -5,6 +5,14 @@ from app.schemas.auth import profile_update_req
 from sqlalchemy import select, func
 
 
+async def get_profile(db: AsyncSession, user_id: int):
+    """获取用户资料；用户主表由鉴权依赖校验，资料缺失时返回空资料。"""
+    profile = await db.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
+    if profile is None:
+        raise APIError(404, "用户资料不存在")
+    return profile
+
+
 async def update_profile(
         db: AsyncSession,
         user_id: int,
