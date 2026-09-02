@@ -16,7 +16,7 @@ from app.core.response import ok, register_exception_handlers
 from app.routers import auth, wallet, user, stats, api_key, admin_users
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import admin_wallet
+from app.routers import admin_wallet
 
 
 def create_app() -> FastAPI:
@@ -50,11 +50,8 @@ def create_app() -> FastAPI:
     app.include_router(stats.router, prefix=settings.api_prefix)
     app.include_router(user.router, prefix=settings.api_prefix)
     app.include_router(api_key.router, prefix=settings.api_prefix)
-<<<<<<< Updated upstream
     app.include_router(admin_users.router, prefix=settings.api_prefix)
-=======
     app.include_router(admin_wallet.router, prefix=settings.api_prefix)
->>>>>>> Stashed changes
     return app
 
 

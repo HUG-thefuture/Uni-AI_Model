@@ -1,6 +1,7 @@
 -- 成员2(WP01)负责的三张表 MySQL 8.0 建表脚本
 -- 口径:与 docs/数据字典.md 一致(逻辑外键、utf8mb4、时间 DATETIME 默认当前时间)
--- 执行人:成员4(8/29 晚,连同 001 用户三表一起执行)
+-- 执行人:成员4(8/29 晚,与 users/user_profiles/wallets 一并执行;
+-- users 三表权威 DDL 见 sql/003_member4_wallets_recharge_orders.sql)
 USE ai_portal;
 
 CREATE TABLE IF NOT EXISTS models (

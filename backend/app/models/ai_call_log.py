@@ -8,13 +8,13 @@ from datetime import datetime
 from sqlalchemy import BigInteger, Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..core.db import Base
+from app.core.db import Base
 from .base import pk_column
 
 
 class AiCallLog(Base):
     __tablename__ = "ai_call_logs"
-    __table_args__ = ({"comment": "模型调用日志表(Provider 层)"},)
+    __table_args__ = {"comment": "模型调用日志表(Provider层)", "extend_existing": True}
 
     id: Mapped[int] = pk_column()
     request_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="链路 ID")
