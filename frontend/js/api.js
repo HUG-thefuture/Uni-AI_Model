@@ -156,6 +156,40 @@
     chatSession(payload) {
       return request({ url: '/api/chat/sessions', method: 'POST', data: payload });
     },
+    streamText(payload, onEvent) {
+      const currentToken = token();
+      const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
+      if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+      return fetch(`${config.apiBase}/api/tasks/text`, {
+        method: 'POST', headers, body: JSON.stringify(payload)
+      }).then(async response => {
+        if (!response.ok) {
+          let body = {};
+          try { body = await response.json(); } catch (error) { /* 保留统一错误提示 */ }
+          if (response.status === 401) { clearToken(); notifyUnauthorized({ requestId: body.request_id }); }
+          throw { status: response.status, code: body.code, message: errorMessage(response.status, body.message), requestId: body.request_id };
+        }
+        if (!response.body) throw { message: '浏览器不支持流式响应，请升级浏览器后重试。' };
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          pending += decoder.decode(chunk.value, { stream: true });
+          const frames = pending.split('\n\n');
+          pending = frames.pop();
+          frames.forEach(frame => {
+            const line = frame.split('\n').find(item => item.startsWith('data:'));
+            if (!line) return;
+            let event;
+            try { event = JSON.parse(line.slice(5).trim()); } catch (error) { return; }
+            if (event.error) throw { code: event.error.code, message: event.error.message || '模型生成失败。' };
+            onEvent(event);
+          });
+        }
+      });
+    },
     task(type, payload) {
       return request({ url: `/api/tasks/${type}`, method: 'POST', data: payload, timeout: type === 'text' ? 120000 : 30000 });
     },

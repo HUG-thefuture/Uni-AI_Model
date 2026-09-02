@@ -120,11 +120,45 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         yield db
 
 
-def init_db() -> None:
-    """建表(注册全部模型映射)。"""
-    from app.models import ai_call_log, ai_task, model, user,api_key,consumption_record,operation_log,recharge_order  # noqa: F401 注册映射
+EXPECTED_TABLE_NAMES = {
+    # 用户侧
+    "users",
+    "user_profiles",
+    "wallets",
+    # 模型与任务
+    "models",
+    "ai_tasks",
+    "ai_call_logs",
+    # 会话与开放平台
+    "chat_sessions",
+    "chat_messages",
+    "api_usage_logs",
+    # 财务与支撑
+    "api_keys",
+    "consumption_records",
+    "operation_logs",
+    "recharge_orders",
+    "invoices",
+}
 
+
+def init_db() -> list[str]:
+    """建表:先 import app.models 注册全部模型,再 create_all(MySQL 已有表不变更)。
+
+    若注册不全,直接抛错而不是静默少建表;返回实际注册/建出的表名(排序)。
+    """
+    from app import models  # noqa: F401,F811 导入即注册全部模型映射
+
+    actual = set(Base.metadata.tables)
+    missing = EXPECTED_TABLE_NAMES - actual
+    if missing:
+        raise RuntimeError(
+            "模型注册缺失,无法自动建表: %s"
+            "(请检查 app/models/__init__.py 是否已 import 对应模型)"
+            % ", ".join(sorted(missing))
+        )
     Base.metadata.create_all(bind=engine)
+    return sorted(actual)
 
 
 #获取解析 token → 查用户 → 校验未禁用

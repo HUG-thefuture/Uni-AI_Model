@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     secret_key: str
 
     # --- 模型密钥(选填,懒校验) ---
+    # 密钥只允许从环境变量或 backend/.env 读取；绝不能提供仓库内默认值。
     siliconflow_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 

@@ -244,10 +244,18 @@ class OnlineProvider(BaseProvider):
         text = (params.get("text") or "").strip()
         if not text:
             raise ProviderError("invalid_params", "声音克隆缺少合成文本")
+        # 门户前端展示中文名，调用上游时转换为 CosyVoice 的官方预置音色标识。
+        voice_aliases = {
+            "龙安洋": "alex", "龙安欢": "bella", "清雅老师": "claire", "星河少年": "benjamin",
+        }
+        voice = str(params.get("voice_name") or "alex").strip()
+        voice = voice_aliases.get(voice, voice)
+        if ":" not in voice and model.model_code.startswith("FunAudioLLM/CosyVoice2"):
+            voice = f"{model.model_code}:{voice}"
         body = {
             "model": model.model_code,
             "input": text,
-            "voice": params.get("voice_name", "alloy"),
+            "voice": voice,
             "response_format": "mp3",
         }
 
@@ -302,9 +310,14 @@ class OnlineProvider(BaseProvider):
         线上模型视频任务将 failed 不扣费,由 Mock 模型兜底演示全链路。
         """
         key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
-        body = {"model": model.model_code, "prompt": prompt}
-        if params:
-            body.update(params)  # resolution / duration 等透传
+        params = params or {}
+        body = {
+            "model": model.model_code,
+            "prompt": prompt,
+            "image_size": params.get("image_size") or params.get("resolution") or "1280x720",
+        }
+        if params.get("image") or params.get("image_url"):
+            body["image"] = params.get("image") or params.get("image_url")
         try:
             resp = await self._post_with_retry(
                 f"{BASE_URL}/v1/video/submit",
@@ -323,9 +336,33 @@ class OnlineProvider(BaseProvider):
             raise ProviderError(
                 "provider_not_ready", "上游视频接口暂不可用,请使用 Mock 模型演示", str(exc)
             ) from exc
-        upstream_id = data.get("task_id") or data.get("id") or data.get("request_id")
+        upstream_id = data.get("requestId") or data.get("task_id") or data.get("id") or data.get("request_id")
         if not upstream_id:
             raise ProviderError(
                 "provider_bad_response", "视频服务未返回任务句柄", resp.text[:500]
             )
         return {"task_id": str(upstream_id), "status": "processing", "raw": data}
+
+    async def query_video(self, model, handle: dict) -> dict:
+        """查询 SiliconFlow 视频任务状态，统一为执行器使用的 completed/processing 语义。"""
+        key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
+        request_id = handle.get("task_id") or handle.get("requestId")
+        if not request_id:
+            raise ProviderError("provider_bad_response", "视频服务未返回任务标识")
+        resp = await self._post_with_retry(
+            f"{BASE_URL}/v1/video/status",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json_body={"requestId": request_id}, model_type="video",
+            validate=lambda r: self._map_http_error(r.status_code, r.text) if r.status_code >= 400 else None,
+        )
+        data = resp.json()
+        status = str(data.get("status") or "")
+        if status == "Succeed":
+            videos = ((data.get("results") or {}).get("videos") or [])
+            url = videos[0].get("url") if videos and isinstance(videos[0], dict) else None
+            if not url:
+                raise ProviderError("provider_bad_response", "视频服务未返回视频地址", resp.text[:500])
+            return {"status": "completed", "video_url": url}
+        if status == "Failed":
+            raise ProviderError("provider_failed", str(data.get("reason") or "视频生成失败"))
+        return {"status": "processing"}

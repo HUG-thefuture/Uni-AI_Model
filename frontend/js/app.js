@@ -18,6 +18,8 @@
     modelSource: '云端模型',
     keyword: '',
     currentChatModel: 'qwen3.7-plus',
+    selectedModelIds: { image: null, audio: null, video: null },
+    chatSessionId: null,
     chatMessages: [{ role: 'assistant', content: '你好！我是你的 AI 创意助手。你可以让我协助优化文案、解释知识点，或开始一次创作。' }],
     chatHistory: [{ title: '欢迎使用 AI 助手', date: '今天' }],
     imageMode: '文生图',
@@ -39,7 +41,7 @@
     ['audio', '声音创作坊', 'layui-icon-voice'], ['video', '视频合成站', 'layui-icon-video'],
     ['tasks', '创作历史', 'layui-icon-list'], ['profile', '个人中心', 'layui-icon-user']
   ];
-  const models = [
+  let models = [
     { name: 'qwen3.7-plus', type: '语言模型', group: '国产顶级模型', source: '云端模型', tag: '深度思考', discount: '6折', desc: '适合问答、写作、代码与复杂任务规划的高质量语言模型。', tone: 'linear-gradient(135deg,#386ee5,#7951d4)' },
     { name: 'qwen-plus', type: '语言模型', group: '阿里系列模型', source: '云端模型', tag: '文本生成', discount: '6折', desc: '面向日常文本创作和多语言理解的通用对话模型。', tone: 'linear-gradient(135deg,#1684af,#2eaf91)' },
     { name: 'qwen-image', type: '生图模型', group: '国产顶级模型', source: '云端模型', tag: '图像生成', discount: '8折', desc: '支持文生图与图生图，适合视觉概念、海报与插画创作。', tone: 'linear-gradient(135deg,#ff825d,#bd4caf)' },
@@ -50,22 +52,84 @@
 
   const api = {
     delay(value, ms) { return new Promise(resolve => setTimeout(() => resolve(value), ms || 400)); },
-    models() { return window.PortalConfig.demoMode ? this.delay(models) : Promise.reject({ message: '模型列表接口尚未接入，请联系项目集成人员。' }); },
+    models() { return window.PortalConfig.demoMode ? this.delay(models) : window.PortalApi.models({ page: 1, page_size: 100 }).then(result => result.items || []); },
     text(payload) {
-      if (!window.PortalConfig.demoMode) return Promise.reject({ message: '文本任务接口尚未接入，请联系项目集成人员。' });
+      if (!window.PortalConfig.demoMode) return Promise.reject({ message: '请使用流式文本接口。' });
       if (shouldSimulateFailure(payload.prompt)) {
         return new Promise((resolve, reject) => setTimeout(() => reject({ message: '演示模式已按指令模拟一次文本任务失败。' }), 760));
       }
       return this.delay({ answer: `这是“${payload.prompt}”的演示回答。接入成员2的 /api/tasks/text 后，这里会显示真实模型的流式或完整结果。` }, 760);
     },
     createTask(payload) {
-      if (!window.PortalConfig.demoMode) return Promise.reject({ message: '创作任务接口尚未接入，请联系项目集成人员。' });
+      if (!window.PortalConfig.demoMode) return Promise.reject({ message: '请使用任务接口。' });
       return this.delay({ id: `TASK-${Date.now().toString().slice(-6)}`, status: 'pending', ...payload }, 380);
     }
   };
 
   function shouldSimulateFailure(value) {
     return window.PortalConfig.demoMode && String(value || '').includes('#失败');
+  }
+
+  function currentModel(type) {
+    if (type === 'text') return models.find(item => item.name === state.currentChatModel && item.modelType === 'text') || models.find(item => item.modelType === 'text');
+    return models.find(item => item.id === state.selectedModelIds[type]) || models.find(item => item.modelType === type);
+  }
+
+  function remoteRecord(kind, response, title, mode, meta) {
+    const record = {
+      id: response.task_id, title, mode, meta,
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      status: response.status || 'pending', kind, attempts: 1, error: ''
+    };
+    state[`${kind}History`].unshift(record);
+    state.tasks.unshift(Object.assign({}, record));
+    pollTask(record);
+    return record;
+  }
+
+  function applyTaskDetail(record, detail) {
+    record.status = detail.status || record.status;
+    record.error = detail.error_message || '';
+    record.resultText = detail.result_text || '';
+    record.resultUrls = detail.result_urls || (detail.result_url ? [detail.result_url] : []);
+    const mirror = state.tasks.find(item => String(item.id) === String(record.id));
+    if (mirror) Object.assign(mirror, record);
+  }
+
+  function pollTask(record, retries) {
+    const remaining = retries == null ? 120 : retries;
+    if (window.PortalConfig.demoMode || remaining <= 0 || ['succeeded', 'failed'].includes(record.status)) return;
+    window.setTimeout(() => {
+      window.PortalApi.taskDetail(record.id).then(detail => {
+        applyTaskDetail(record, detail);
+        if (['pending', 'processing'].includes(record.status)) pollTask(record, remaining - 1);
+        if (['image', 'audio', 'video', 'tasks'].includes(state.route)) render();
+      }).catch(error => {
+        record.error = error && error.message ? error.message : '无法读取任务状态';
+        if (state.route === record.kind || state.route === 'tasks') render();
+      });
+    }, 2000);
+  }
+
+  function loadModels() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return Promise.resolve();
+    return api.models().then(items => {
+      const typeNames = { text: '语言模型', image: '生图模型', audio: 'TTS模型', video: '生视频模型' };
+      models = items.filter(item => item.available !== false).map((item, index) => ({
+        id: item.id, name: item.name, modelType: item.model_type,
+        type: typeNames[item.model_type] || '其他模型',
+        group: item.provider_type === 'local' ? '私域知识模型' : '云端模型',
+        source: item.provider_type === 'local' ? '私域模型' : '云端模型',
+        tag: Array.isArray(item.capability_tags) ? item.capability_tags[0] || item.model_type : item.model_type,
+        discount: item.price_per_call ? `¥${item.price_per_call}/次` : '免费',
+        desc: item.description || '已接入平台模型服务。',
+        tone: ['#386ee5', '#7951d4', '#2eaf91', '#bd4caf'][index % 4]
+      }));
+      const selected = currentModel('text');
+      if (selected) state.currentChatModel = selected.name;
+    }).catch(error => {
+      toast(error && error.message ? `模型列表加载失败：${error.message}` : '模型列表加载失败，请稍后刷新。', 'error');
+    });
   }
 
   function normalizeText(value, fallback, maxLength) {
@@ -254,9 +318,7 @@
     return `<article class="model-card">
       <div class="model-card-top"><span class="model-logo" style="background:${tone}">${escapeHtml(initials)}</span><span class="discount">${escapeHtml(model.discount)}</span></div>
       <h3 class="model-name">${escapeHtml(rawName)}</h3><p class="model-desc">${escapeHtml(model.desc)}</p>
-      <div class="model-meta"><span class="tag">${escapeHtml(model.tag)}</span>${window.PortalConfig.demoMode
-        ? `<button class="btn-quiet" type="button" data-use-model="${escapeHtml(rawName)}">立即使用</button>`
-        : `<button class="btn-quiet" type="button" disabled aria-disabled="true" title="真实模型接口尚未接入">接口待接入</button>`}</div>
+      <div class="model-meta"><span class="tag">${escapeHtml(model.tag)}</span><button class="btn-quiet" type="button" data-use-model="${escapeHtml(rawName)}">立即使用</button></div>
     </article>`;
   }
 
@@ -285,7 +347,7 @@
   function modelsView() {
     const groups = ['全部分组', '国产顶级模型', '阿里系列模型', '首推旗舰模型', '私域知识模型'];
     const types = ['全部', '语言模型', '多模态模型', 'TTS模型', '生图模型', '生视频模型', '本地模型'];
-    return `${pageHead('模型广场', window.PortalConfig.demoMode ? '探索可用于创作与开发的模型能力，按场景快速筛选。' : '模型列表接口尚未挂载，当前仅展示目录结构。')}
+    return `${pageHead('模型广场', '探索可用于创作与开发的模型能力，按场景快速筛选。')}
       <section class="panel panel-pad"><div class="filters" style="margin-bottom:12px"><button type="button" class="filter-btn ${state.modelSource === '云端模型' ? 'active' : ''}" data-source="云端模型" aria-pressed="${state.modelSource === '云端模型'}">云端模型</button><button type="button" class="filter-btn ${state.modelSource === '私域模型' ? 'active' : ''}" data-source="私域模型" aria-pressed="${state.modelSource === '私域模型'}">私域模型</button></div>
       <div class="filters" style="margin-bottom:12px">${groups.map(item => `<button type="button" class="filter-btn ${state.modelGroup === item ? 'active' : ''}" data-group="${item}" aria-pressed="${state.modelGroup === item}">${item}</button>`).join('')}</div>
       <div class="models-toolbar"><div class="filters">${types.map(item => `<button type="button" class="filter-btn ${state.modelType === item ? 'active' : ''}" data-type="${item}" aria-pressed="${state.modelType === item}">${item}</button>`).join('')}</div><label class="search-field">${icon('layui-icon-search')}<input class="field" id="model-search" value="${escapeHtml(state.keyword)}" placeholder="搜索模型名称" aria-label="搜索模型名称" /></label></div>
@@ -295,11 +357,11 @@
   function textView() {
     const chatModels = models.filter(item => item.type === '语言模型' || item.type === '本地模型');
     const messages = state.chatMessages.map(item => `<div class="message ${item.role === 'user' ? 'user' : ''}"><span class="message-avatar">${item.role === 'user' ? escapeHtml(user.initial) : 'AI'}</span><div class="bubble">${item.loading ? '<span class="typing-dots"><i></i><i></i><i></i></span>' : escapeHtml(item.content)}</div></div>`).join('');
-    return `${pageHead('文本交互舱', window.PortalConfig.demoMode ? '选择模型，开始一次专注的对话与创作。' : '文本接口尚未挂载，当前仅展示页面结构。')}
+    return `${pageHead('文本交互舱', '选择模型，开始一次专注的对话与创作。')}
       <section class="panel chat-layout">
         <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button type="button" class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${escapeHtml(model.name)}" aria-pressed="${state.currentChatModel === model.name}">${escapeHtml(model.name)}<small>${escapeHtml(model.tag)}</small></button>`).join('')}</div></aside>
-        <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button" ${window.PortalConfig.demoMode ? "" : "disabled aria-disabled=\"true\" title=\"会话接口尚未接入\""}>${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…" aria-label="对话内容，按 Ctrl 加 Enter 发送"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text || !window.PortalConfig.demoMode ? 'disabled' : ''}>${state.busy.text ? '生成中…' : (window.PortalConfig.demoMode ? '发送' : '接口待接入')} ${icon('layui-icon-release')}</button></div></div></div>
-        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" ${window.PortalConfig.demoMode ? "" : "disabled aria-disabled=\"true\" title=\"会话接口尚未接入\""} aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('')}</div></aside>
+        <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…" aria-label="对话内容，按 Ctrl 加 Enter 发送"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
+        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('')}</div></aside>
       </section>`;
   }
 
@@ -439,12 +501,28 @@
   function sendChat() {
     const input = $('#chat-input'); const prompt = input.val().trim();
     if (!prompt) return toast('请输入问题或指令后再发送。', 'error');
-    if (!window.PortalConfig.demoMode) return toast('文本任务接口尚未接入，请联系项目集成人员。', 'error');
     if (state.busy.text) return toast('上一条消息仍在处理中，请稍候。', 'error');
+    const model = currentModel('text');
+    if (!window.PortalConfig.demoMode && !model) return toast('当前没有可用的文本模型，请先在模型广场确认模型状态。', 'error');
     state.busy.text = true;
     state.chatMessages.push({ role: 'user', content: prompt }); state.chatMessages.push({ role: 'assistant', loading: true }); render();
-    api.text({ model: state.currentChatModel, prompt }).then(result => {
-      state.chatMessages[state.chatMessages.length - 1] = { role: 'assistant', content: result.answer };
+    const stream = window.PortalConfig.demoMode
+      ? api.text({ model: state.currentChatModel, prompt }).then(result => ({ answer: result.answer }))
+      : (state.chatSessionId ? Promise.resolve({ session_id: state.chatSessionId }) : window.PortalApi.chatSession({ model_id: model.id }))
+        .then(session => {
+          state.chatSessionId = session.session_id;
+          let answer = '';
+          return window.PortalApi.streamText({ session_id: session.session_id, model_id: model.id, message: prompt }, event => {
+            if (event.error) throw { message: event.error.message };
+            if (event.delta) {
+              answer += event.delta;
+              state.chatMessages[state.chatMessages.length - 1] = { role: 'assistant', content: answer };
+              const list = $('#message-list'); if (list[0]) list.scrollTop(list[0].scrollHeight);
+            }
+          }).then(() => ({ answer }));
+        });
+    stream.then(result => {
+      state.chatMessages[state.chatMessages.length - 1] = { role: 'assistant', content: result.answer || '模型未返回文本内容。' };
       state.chatHistory.unshift({ title: prompt.slice(0, 18) + (prompt.length > 18 ? '…' : ''), date: '刚刚' });
     }).catch(error => {
       state.chatMessages[state.chatMessages.length - 1] = { role: 'assistant', content: error && error.message ? error.message : '当前模型暂时无法响应，请稍后重试。' };
@@ -536,7 +614,7 @@
         window.location.assign(loginUrl);
       });
     });
-    $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; setRoute('text'); } else if (found.type === '生图模型') setRoute('image'); else if (found.type === 'TTS模型') setRoute('audio'); else if (found.type === '生视频模型') setRoute('video'); else toast('该模型的应用入口正在准备中。'); });
+    $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.modelType === 'text' || found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; state.chatSessionId = null; setRoute('text'); } else if (found.modelType === 'image' || found.type === '生图模型') { state.selectedModelIds.image = found.id; setRoute('image'); } else if (found.modelType === 'audio' || found.type === 'TTS模型') { state.selectedModelIds.audio = found.id; setRoute('audio'); } else if (found.modelType === 'video' || found.type === '生视频模型') { state.selectedModelIds.video = found.id; setRoute('video'); } else toast('该模型的应用入口正在准备中。'); });
     $('[data-source]').on('click', function () { state.modelSource = $(this).data('source'); render(); });
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });
     $('[data-type]').on('click', function () { state.modelType = $(this).data('type'); render(); });
@@ -544,17 +622,44 @@
     $('[data-chat-model]').on('click', function () { state.currentChatModel = $(this).data('chat-model'); render(); });
     $('#send-chat').on('click', sendChat); $('#chat-input').on('keydown', event => { if (event.ctrlKey && event.key === 'Enter') sendChat(); });
     $('[data-prompt]').on('click', function () { $('#chat-input').val($(this).data('prompt')).focus(); });
-    $('#new-chat, #new-chat-side').on('click', () => { state.chatMessages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }]; persistDemoState(); render(); });
+    $('#new-chat, #new-chat-side').on('click', () => { state.chatSessionId = null; state.chatMessages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }]; persistDemoState(); render(); });
     $('[data-image-mode]').on('click', function () { state.imageMode = $(this).data('image-mode'); render(); });
     $('[data-ratio]').on('click', function () { state.imageRatio = $(this).data('ratio'); render(); });
-    $('#image-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#image-prompt').val().trim(); if (!prompt) return toast('请先填写图像描述词。', 'error'); if (state.busy.image) return; state.busy.image = true; const record = createRecord('image', { title: prompt.slice(0, 22) + (prompt.length > 22 ? '…' : ''), mode: state.imageMode, meta: state.imageRatio, shouldFail: shouldSimulateFailure(prompt) }); if (!record) { state.busy.image = false; return; } state.busy.image = false; toast('图像任务已提交，正在生成。', 'success'); render(); });
+    $('#image-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#image-prompt').val().trim(); if (!prompt) return toast('请先填写图像描述词。', 'error'); if (state.busy.image) return; state.busy.image = true; const title = prompt.slice(0, 22) + (prompt.length > 22 ? '…' : ''); const model = currentModel('image'); const submit = window.PortalConfig.demoMode ? Promise.resolve(createRecord('image', { title, mode: state.imageMode, meta: state.imageRatio, shouldFail: shouldSimulateFailure(prompt) })) : (model ? window.PortalApi.task('image', { model_id: model.id, prompt, params: { image_size: state.imageRatio.split(' ')[1].replace('×', 'x'), num: Number($('#image-count').val()) } }).then(result => remoteRecord('image', result, title, state.imageMode, state.imageRatio)) : Promise.reject({ message: '当前没有可用的图像模型。' })); submit.then(() => toast('图像任务已提交，正在生成。', 'success')).catch(error => toast(error && error.message ? error.message : '图像任务提交失败。', 'error')).finally(() => { state.busy.image = false; render(); }); });
     $('[data-audio-mode]').on('click', function () { state.audioMode = $(this).data('audio-mode'); render(); });
     $('[data-voice]').on('click', function () { state.selectedVoice = $(this).data('voice'); render(); });
     $('#audio-text').on('input', function () { $('#audio-count').text(`${$(this).val().length} / 2000 字符`); });
     $('#audio-form').on('submit', function (event) { event.preventDefault(); const text = $('#audio-text').val().trim(); if (!text) return toast('请先输入需要合成的文本。', 'error'); if (state.busy.audio) return; state.busy.audio = true; const record = createRecord('audio', { title: text.slice(0, 20) + (text.length > 20 ? '…' : ''), mode: state.audioMode, meta: `${text.length} 字符`, shouldFail: shouldSimulateFailure(text) }); if (!record) { state.busy.audio = false; return; } state.busy.audio = false; toast('声音任务已提交，请在历史中查看进度。', 'success'); render(); });
     $('[data-video-duration]').on('click', function () { state.videoDuration = $(this).data('video-duration'); render(); });
     $('#video-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#video-prompt').val().trim(); if (!prompt) return toast('请先描述要生成的视频内容。', 'error'); if (state.busy.video) return; state.busy.video = true; const record = createRecord('video', { title: prompt.slice(0, 20) + (prompt.length > 20 ? '…' : ''), mode: '文生视频', meta: state.videoDuration, shouldFail: shouldSimulateFailure(prompt) }); if (!record) { state.busy.video = false; return; } state.busy.video = false; toast('视频任务已提交，渲染可能需要几分钟。', 'success'); render(); });
-    $('[data-retry]').on('click', function () { if (!window.PortalConfig.demoMode) return toast('任务重试接口尚未接入，请联系项目集成人员。', 'error'); const id = String($(this).data('retry')); let record; ['imageHistory', 'audioHistory', 'videoHistory'].some(key => { record = state[key].find(item => String(item.id) === id); return Boolean(record); }); if (!record) return toast('没有找到需要重试的任务。', 'error'); record.status = 'pending'; record.error = ''; record.shouldFail = false; record.attempts = (record.attempts || 1) + 1; const mirror = state.tasks.find(item => String(item.id) === id); if (mirror) Object.assign(mirror, record); persistDemoState(); scheduleDemoTask(record, true); toast('任务已重新提交，本次演示将正常完成。', 'success'); render(); });
+    if (!window.PortalConfig.demoMode) {
+      $('#image-submit, #audio-submit, #video-submit').prop('disabled', false).removeAttr('aria-disabled').each(function () {
+        $(this).html(`${icon('layui-icon-release')} ${this.id === 'video-submit' ? '文生视频' : this.id === 'audio-submit' ? '生成音频' : '立即生成'}`);
+      });
+      $('#audio-form').off('submit').on('submit', function (event) {
+        event.preventDefault();
+        const text = $('#audio-text').val().trim(); const model = currentModel('audio');
+        if (!text) return toast('请先输入需要合成的文本。', 'error');
+        if (!model) return toast('当前没有可用的音频模型。', 'error');
+        state.busy.audio = true;
+        window.PortalApi.request({ url: '/api/tasks/audio/clone', method: 'POST', data: { model_id: model.id, voice_name: state.selectedVoice, text } })
+          .then(result => { remoteRecord('audio', result, text.slice(0, 20), state.audioMode, `${text.length} 字符`); toast('声音任务已提交。', 'success'); })
+          .catch(error => toast(error && error.message ? error.message : '声音任务提交失败。', 'error'))
+          .finally(() => { state.busy.audio = false; render(); });
+      });
+      $('#video-form').off('submit').on('submit', function (event) {
+        event.preventDefault();
+        const text = $('#video-prompt').val().trim(); const model = currentModel('video');
+        if (!text) return toast('请先描述要生成的视频内容。', 'error');
+        if (!model) return toast('当前没有可用的视频模型。', 'error');
+        state.busy.video = true;
+        window.PortalApi.task('video', { model_id: model.id, text, params: { duration_sec: Number.parseInt(state.videoDuration, 10), resolution: $('#video-resolution').val().startsWith('1080') ? '1920x1080' : '1280x720' } })
+          .then(result => { remoteRecord('video', result, text.slice(0, 20), '文生视频', state.videoDuration); toast('视频任务已提交。', 'success'); })
+          .catch(error => toast(error && error.message ? error.message : '视频任务提交失败。', 'error'))
+          .finally(() => { state.busy.video = false; render(); });
+      });
+    }
+    $('[data-retry]').on('click', function () { const id = String($(this).data('retry')); if (!window.PortalConfig.demoMode) { return window.PortalApi.taskRetry(id).then(result => { const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id); if (record) { record.status = result.status; record.error = ''; pollTask(record); } toast('任务已重新提交。', 'success'); render(); }).catch(error => toast(error && error.message ? error.message : '任务重试失败。', 'error')); } let record; ['imageHistory', 'audioHistory', 'videoHistory'].some(key => { record = state[key].find(item => String(item.id) === id); return Boolean(record); }); if (!record) return toast('没有找到需要重试的任务。', 'error'); record.status = 'pending'; record.error = ''; record.shouldFail = false; record.attempts = (record.attempts || 1) + 1; const mirror = state.tasks.find(item => String(item.id) === id); if (mirror) Object.assign(mirror, record); persistDemoState(); scheduleDemoTask(record, true); toast('任务已重新提交，本次演示将正常完成。', 'success'); render(); });
     $('[data-view-task]').on('click', function () {
       const id = String($(this).data('view-task'));
       const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id);
@@ -650,5 +755,5 @@
   hydrateDemoState();
   resumeDemoTasks();
   $(window).on('hashchange', render);
-  $(function () { loadCurrentUser().finally(render); });
+  $(function () { loadCurrentUser().then(loadModels).finally(render); });
 }());

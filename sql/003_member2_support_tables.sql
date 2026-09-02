@@ -1,7 +1,9 @@
 -- 成员2(WP04/06/07)配套的支撑表 MySQL 8.0 建表脚本
--- 说明:users/user_profiles/wallets 由成员1 的 001 脚本负责,此处不重复;
---       consumption_records / operation_logs / api_keys / api_usage_logs 归属成员4,
---       本脚本按 wp04/06 提示词口径先行落地,字段若与成员4 终版冲突,以成员4 DDL 为准。
+-- 本脚本只负责 chat_sessions / chat_messages / api_usage_logs 三张表。
+-- 去重口径:consumption_records / operation_logs / api_keys / users /
+-- user_profiles / wallets / invoices / recharge_orders 的权威 DDL 统一在
+-- sql/003_member4_wallets_recharge_orders.sql,本脚本不再建这两类表,
+-- 避免两版结构不一致导致“先执行者胜、后执行者被静默跳过”。
 USE ai_portal;
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -53,27 +55,3 @@ CREATE TABLE IF NOT EXISTS api_usage_logs (
   PRIMARY KEY (id),
   KEY idx_usage_key_created (key_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='开放平台调用统计';
-
-CREATE TABLE IF NOT EXISTS consumption_records (
-  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id     BIGINT UNSIGNED NOT NULL,
-  task_id     BIGINT UNSIGNED DEFAULT NULL,
-  model_id    BIGINT UNSIGNED DEFAULT NULL,
-  amount      BIGINT          NOT NULL COMMENT '消耗积分点(整数)',
-  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_consume_user_created (user_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='消费流水(成员4 最小桩,TODO 字段对齐)';
-
-CREATE TABLE IF NOT EXISTS operation_logs (
-  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id       BIGINT UNSIGNED DEFAULT NULL,
-  action        VARCHAR(50)     NOT NULL,
-  resource_type VARCHAR(50)     NOT NULL,
-  resource_id   BIGINT UNSIGNED DEFAULT NULL,
-  detail_json   TEXT            COMMENT '操作详情 JSON',
-  created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  KEY idx_op_resource (resource_type, resource_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='管理操作日志(成员4 最小桩)';

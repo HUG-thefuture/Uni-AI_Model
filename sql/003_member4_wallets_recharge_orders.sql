@@ -1,7 +1,10 @@
--- 成员4(WP01)第一天 MySQL 脚本
--- 口径：与 docs/数据字典.md 与 docs/项目框架与任务分工.md 一致
--- 目的：完成钱包、充值与财务类基础表的建表，满足 8/29 接口前置需求
--- 执行方式：在 ai_portal 库中执行本脚本
+-- 成员4 财务/账号相关表 MySQL 8.0 建表脚本(仓库内权威定义)
+-- 口径：与 docs/数据字典.md、SQLAlchemy ORM(app/models/*.py)逐列一致
+-- 本文件负责:users / user_profiles / wallets / recharge_orders / invoices /
+-- consumption_records / api_keys / operation_logs,共 8 张。
+-- 注意:仓库内不存在 001 用户脚本,users 三表以此文件为唯一来源;
+-- sql/003_member2_support_tables.sql 不再重复建 consumption_records / operation_logs。
+-- 执行方式:先执行 sql/000_bootstrap.sql 建库,再在本库中执行本脚本
 
 USE ai_portal;
 
@@ -63,6 +66,21 @@ CREATE TABLE IF NOT EXISTS recharge_orders (
   KEY idx_user_created (user_id, created_at),
   KEY idx_status_created (status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='充值订单表';
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '发票主键',
+  user_id     BIGINT UNSIGNED NOT NULL COMMENT '逻辑外键 users.id',
+  amount      BIGINT          NOT NULL DEFAULT 0 COMMENT '开票金额(分)',
+  title       VARCHAR(100)    NOT NULL COMMENT '发票抬头',
+  type        VARCHAR(20)     NOT NULL DEFAULT 'personal' COMMENT '发票类型: personal / enterprise',
+  status      VARCHAR(20)     NOT NULL DEFAULT 'pending' COMMENT '状态: pending / issued / rejected',
+  tax_no      VARCHAR(50)     DEFAULT NULL COMMENT '企业税号',
+  created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (id),
+  KEY idx_user_created (user_id, created_at),
+  KEY idx_status_created (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='发票表';
 
 CREATE TABLE IF NOT EXISTS consumption_records (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录主键',
