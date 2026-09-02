@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-from schemas.admin_wallet import InvoiceResponse, InvoiceCreate
-from ..core.response import APIError, ok
-from ..models.user import get_current_user
-from ..services import wallet,admin_wallet
-from ..core.db import get_async_db
-from ..schemas.wallet import RechargeRequest, WalletRecordsResponse, WalletResponse, RechargeResponse
+from app.schemas.admin_wallet import InvoiceResponse, InvoiceCreate
+from app.core.response import APIError, ok
+from app.models.user import get_current_user
+from app.services import wallet,admin_wallet
+from app.core.db import get_async_db
+from app.schemas.wallet import RechargeRequest, WalletRecordsResponse, WalletResponse, RechargeResponse
 
 router = APIRouter(
     prefix="/wallet",

@@ -2,34 +2,31 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, Wallet  # 假设User模型在其他地方定义
-from ..models.consumption_record import ConsumptionRecord
-from ..models.invoice import Invoice
-from ..models.recharge_order import RechargeOrder
-from ..schemas.admin_wallet import InvoiceCreate
+from app.models.consumption_record import ConsumptionRecord
+from app.models.invoice import Invoice
+from app.models.recharge_order import RechargeOrder
+from app.schemas.admin_wallet import InvoiceCreate
 
 
-# ... 原有代码 ...
+def _dt(value):
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
 
 # 4. 管理端：用户钱包列表（分页/搜索）
 async def get_admin_wallets(db: AsyncSession, page: int, page_size: int, keyword: str = "") -> dict:
     offset = (page - 1) * page_size
 
-    # 联表查询：查询钱包和对应的用户名
     stmt = select(Wallet, User.username).join(User, User.id == Wallet.user_id)
 
     if keyword:
         stmt = stmt.where(User.username.like(f"%{keyword}%"))
 
     stmt = stmt.order_by(Wallet.updated_at.desc()).offset(offset).limit(page_size)
-
-    # 必须用 db.execute，因为拿回的是 (钱包对象, 用户名) 的元组
     result = await db.execute(stmt)
     rows = result.all()
 
-    # 计算总数
     total_count = await db.scalar(select(func.count()).select_from(Wallet))
 
-    # 转换格式，把元组拆开，方便前端直接读取
     wallet_list = [
         {
             "user_id": w.user_id,
@@ -37,7 +34,7 @@ async def get_admin_wallets(db: AsyncSession, page: int, page_size: int, keyword
             "balance": w.balance,
             "total_recharged": w.total_recharged,
             "total_consumed": w.total_consumed,
-            "created_at": w.created_at
+            "created_at": _dt(w.created_at),
         }
         for w, u in rows
     ]
@@ -55,7 +52,24 @@ async def get_admin_orders(db: AsyncSession, page: int, page_size: int, status: 
     orders = (await db.scalars(stmt)).all()
     total_count = await db.scalar(select(func.count()).select_from(RechargeOrder))
 
-    return {"list": orders, "total": total_count, "page": page, "page_size": page_size}
+    order_list = [
+        {
+            "id": order.id,
+            "order_no": order.order_no,
+            "user_id": order.user_id,
+            "amount": order.amount,
+            "points": order.points,
+            "payment_method": order.payment_method,
+            "status": order.status,
+            "external_trade_no": order.external_trade_no,
+            "paid_at": _dt(order.paid_at),
+            "created_at": _dt(order.created_at),
+            "updated_at": _dt(order.updated_at),
+        }
+        for order in orders
+    ]
+
+    return {"list": order_list, "total": total_count, "page": page, "page_size": page_size}
 
 
 # 6. 管理端：消费记录
@@ -71,7 +85,19 @@ async def get_admin_consumption(db: AsyncSession, page: int, page_size: int, use
     records = (await db.scalars(stmt)).all()
     total_count = await db.scalar(select(func.count()).select_from(ConsumptionRecord))
 
-    return {"list": records, "total": total_count, "page": page, "page_size": page_size}
+    record_list = [
+        {
+            "id": record.id,
+            "user_id": record.user_id,
+            "model_id": record.model_id,
+            "amount": record.amount,
+            "status": record.status,
+            "created_at": _dt(record.created_at),
+        }
+        for record in records
+    ]
+
+    return {"list": record_list, "total": total_count, "page": page, "page_size": page_size}
 
 
 # 7. 管理端：发票（P1）
@@ -82,7 +108,22 @@ async def get_admin_invoices(db: AsyncSession, page: int, page_size: int) -> dic
 
     total_count = await db.scalar(select(func.count()).select_from(Invoice))
 
-    return {"list": invoices, "total": total_count, "page": page, "page_size": page_size}
+    invoice_list = [
+        {
+            "id": invoice.id,
+            "user_id": invoice.user_id,
+            "amount": invoice.amount,
+            "title": invoice.title,
+            "type": invoice.type,
+            "status": invoice.status,
+            "tax_no": invoice.tax_no,
+            "created_at": _dt(invoice.created_at),
+            "updated_at": _dt(invoice.updated_at),
+        }
+        for invoice in invoices
+    ]
+
+    return {"list": invoice_list, "total": total_count, "page": page, "page_size": page_size}
 
 
 # 新增：用户申请开票
@@ -102,21 +143,19 @@ async def create_invoice(db: AsyncSession, user_id: int, data: InvoiceCreate) ->
 
 # 12. 管理端：全量调用统计
 async def get_admin_usage_stats(db: AsyncSession) -> dict:
-    # 1. 总调用次数
     total_calls = await db.scalar(
         select(func.count(ConsumptionRecord.id)).where(ConsumptionRecord.status == 'success')
     )
 
-    # 2. 总消费金额
     total_cost = await db.scalar(
-        select(func.sum(ConsumptionRecord.amount)).where(ConsumptionRecord.status == 'success')
+        select(func.coalesce(func.sum(ConsumptionRecord.amount), 0)).where(ConsumptionRecord.status == 'success')
     )
 
-    # 3. 总用户数（跨表查一下 users 的数量）
     total_users = await db.scalar(select(func.count()).select_from(User))
 
     return {
-        "total_calls": total_calls or 0,
+        "total_call": total_calls or 0,
+        "total_tokens": 0,
+        "total_cost": total_cost or 0,
         "total_users": total_users or 0,
-        "total_cost": total_cost or 0
     }
