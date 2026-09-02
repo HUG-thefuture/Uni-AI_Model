@@ -14,13 +14,13 @@ router = APIRouter(
     tags=["钱包"],
 )
 
-@router.get("/me", response_model=WalletResponse)
+@router.get("/me")
 async def my_wallet(db: AsyncSession = Depends(get_async_db), current_user=Depends(get_current_user)):
     stmt=await wallet.get_wallet(current_user.id,db)
     return ok(WalletResponse.model_validate(stmt).model_dump(mode="json"))
 
 
-@router.post("/recharge", response_model=RechargeResponse)
+@router.post("/recharge")
 async def recharge(recharge_data: RechargeRequest, db: AsyncSession = Depends(get_async_db), current_user=Depends(get_current_user)):
     if recharge_data.amount <= 0:
         raise APIError(400, "充值金额必须大于0")
@@ -33,7 +33,7 @@ async def recharge(recharge_data: RechargeRequest, db: AsyncSession = Depends(ge
         raise APIError(500, "充值失败，请稍后重试") from None
 
 
-@router.get("/records", response_model=WalletRecordsResponse)
+@router.get("/records")
 async def get_records(db: AsyncSession = Depends(get_async_db), current_user=Depends(get_current_user), page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页条数")):
     stmt=await wallet.get_user_records(db,current_user.id,page,page_size)
