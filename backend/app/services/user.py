@@ -112,7 +112,7 @@ async def update_user_status(db: AsyncSession, target_id: int, status: int, oper
     if user is None:
         raise APIError(404, "用户不存在")
     if user.id == operator.id:
-        raise APIError(400, "不能操作自己的账号")
+        raise APIError(403, "不能操作自己的账号")
     user.status = status
     await db.commit()
     await db.refresh(user)
@@ -235,7 +235,7 @@ async def soft_delete_user(db: AsyncSession, target_id: int, operator: User) -> 
     if user is None:
         raise APIError(404, "用户不存在")
     if user.id == operator.id:
-        raise APIError(400, "不能删除自己的账号")
+        raise APIError(403, "不能删除自己的账号")
     if user.status == -1:
         raise APIError(400, "该用户已删除")
     user.status = -1

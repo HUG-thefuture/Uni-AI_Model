@@ -115,10 +115,10 @@ class UserApiTest(unittest.TestCase):
             json={"amount": 100, "payment_method": "bank"},
         )
         self.assertEqual(recharge.status_code, 200, recharge.text)
-        self.assertEqual(recharge.json()["payment_method"], "bank")
+        self.assertEqual(recharge.json()["data"]["payment_method"], "bank")
         wallet = self.client.get("/api/wallet/me", headers=self._auth(user_token))
         self.assertEqual(wallet.status_code, 200, wallet.text)
-        self.assertEqual(wallet.json()["balance"], 100)
+        self.assertEqual(wallet.json()["data"]["balance"], 100)
         invalid_method = self.client.post(
             "/api/wallet/recharge",
             headers=self._auth(user_token),
@@ -163,7 +163,7 @@ class UserApiTest(unittest.TestCase):
 
         stats = self.client.get("/api/stats/usage", headers=self._auth(admin_token))
         self.assertEqual(stats.status_code, 200, stats.text)
-        self.assertEqual(stats.json(), {"total_call": 1, "total_tokens": 0, "total_cost": 7})
+        self.assertEqual(stats.json()["data"], {"total_call": 1, "total_tokens": 0, "total_cost": 7})
 
         self_disable = self.client.put(
             f"/api/admin/users/{self.admin_id}/status",
