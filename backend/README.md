@@ -69,7 +69,7 @@ ollama list                    # 确认模型就绪(建议顺带 qwen2.5:3b)
 # 2. 配置 OLLAMA_BASE_URL(backend/.env,默认 http://localhost:11434,可省略)
 echo OLLAMA_BASE_URL=http://localhost:11434 >> .env
 
-# 3. 重建 4 个种子模型(幂等:线上对话/线上文生图 + 本地 qwen2.5:3b / qwen2.5:1.5b)
+# 3. 重建模型种子(幂等，数量以 docs/model-config-template.json 为准)
 python scripts/seed_models.py
 
 # 4. 启动后端,打开前端模型广场
@@ -203,12 +203,9 @@ pip install -r requirements.txt
 copy .env.example .env        # Linux/macOS: cp .env.example .env
 # 编辑 .env:必填 DATABASE_URL / SECRET_KEY;联调线上模型填 SILICONFLOW_API_KEY
 
-# 4. 初始化数据库(幂等全量建表:users/wallets/models/chat/财务等共 14 张)
+# 4. 初始化数据库与模型(幂等全量建表并同步模型模板)
 #    前置:MySQL 中已存在 ai_portal 库(先执行 sql/000_bootstrap.sql)
-python -m app.init_db
-
-# 5. 写入 4 个种子模型(幂等 upsert:线上对话/线上文生图 + 本地 qwen2.5:3b / 1.5b)
-python scripts/seed_models.py
+python -m app.init_all
 
 # 6. (可选)写入演示数据:2 个演示用户 + 任务/会话/调用日志,断网演示可用
 DATABASE_URL=sqlite:///./demo.db SECRET_KEY=demo python scripts/seed_demo.py
@@ -223,8 +220,9 @@ uvicorn app.main:app --reload --port 8000
 
 | 命令 | 作用 |
 | --- | --- |
-| `python -m app.init_db` | 幂等全量建表 14 张(模型注册不全时报错;已有表不受影响,不改结构) |
-| `python scripts/seed_models.py` | 从 `docs/model-config-template.json` 幂等写入/更新 4 个模型 |
+| `python -m app.init_all` | 幂等建表并从 `docs/model-config-template.json` 同步全部模型 |
+| `python -m app.init_db` | 仅建表（兼容旧部署流程） |
+| `python scripts/seed_models.py` | 仅同步模型模板，适合单独刷新模型配置 |
 | `python scripts/seed_demo.py` | 演示数据(demo_user/demo_admin、钱包余额 1000、任务/会话/日志),幂等可重复执行 |
 | `python scripts/test_m_series.py` | M-01~M-08 稳定性用例,结果写 `docs/m-series-result.md` |
 

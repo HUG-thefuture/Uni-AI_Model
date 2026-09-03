@@ -1,11 +1,11 @@
-"""模型种子脚本(WP03,WP08 扩展为 4 个模型):从 docs/model-config-template.json 幂等写入 models 表。
+"""模型种子脚本:从 docs/model-config-template.json 幂等写入 models 表。
 
 用法(在 backend/ 目录下执行):
 
     python scripts/seed_models.py
 
 - 按 model_code+provider_type 判重:存在则更新字段,不存在则插入,可重复执行;
-- 共 4 个模型:线上对话/线上文生图(siliconflow)+ 本地 qwen2.5:3b / qwen2.5:1.5b(ollama);
+- 模型数量以模板文件为准，支持线上与本地模型混合配置;
 - config_json 只存非敏感参数,密钥一律走环境变量(严禁入库);
 - 执行前自动建表(幂等,已有表不受影响)。
 """

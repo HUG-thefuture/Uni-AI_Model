@@ -79,6 +79,12 @@ class Settings(BaseSettings):
             "video": self.provider_read_timeout_av,
         }
 
+    @property
+    def upload_path(self) -> Path:
+        """上传与生成产物的绝对目录，不随 uvicorn 的启动目录变化。"""
+        path = Path(self.upload_dir)
+        return path if path.is_absolute() else BASE_DIR / path
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -61,7 +61,7 @@ def _fail_task(db, task: AiTask | None, message: str, start: float) -> None:
         logger.exception("任务 %s 失败收尾异常", task.id)
 
 
-async def _poll_video_result(provider, model, handle: dict) -> str:
+async def _poll_video_result(provider, model, handle: dict) -> list[str]:
     """视频句柄轮询:上游查询接口本期未定(TODO 登记 docs/api.md)。
 
     - provider 若实现 query_video(model, handle)(Mock 已实现)则按间隔调用,
@@ -77,8 +77,10 @@ async def _poll_video_result(provider, model, handle: dict) -> str:
         await asyncio.sleep(interval)
         if callable(query):
             poll = await query(model, handle)
-            if poll.get("status") == "completed" and poll.get("video_url"):
-                return poll["video_url"]
+            if poll.get("status") == "completed":
+                urls = poll.get("video_urls") or ([poll["video_url"]] if poll.get("video_url") else [])
+                if urls:
+                    return urls
     raise ProviderError("provider_timeout", "视频生成超时,本次不扣费")
 
 
@@ -176,10 +178,13 @@ async def run_async_task(task_id: int) -> None:
                 provider.generate_video(model, task.prompt or "", params),
                 timeout=get_settings().read_timeouts.get("video", 300),
             )
-            if handle.get("status") == "completed" and handle.get("video_url"):
-                task.result_url = handle["video_url"]
+            if handle.get("status") == "completed" and (handle.get("video_urls") or handle.get("video_url")):
+                urls = handle.get("video_urls") or [handle["video_url"]]
+                task.result_url = json.dumps(urls, ensure_ascii=False)
             else:
-                task.result_url = await _poll_video_result(provider, model, handle)
+                task.result_url = json.dumps(
+                    await _poll_video_result(provider, model, handle), ensure_ascii=False
+                )
         else:
             raise ProviderError("not_implemented", "该任务类型暂未开放,请等待后续版本")
 
@@ -251,9 +256,9 @@ def task_to_item(task: AiTask) -> dict:
 
 
 def task_to_detail(task: AiTask) -> dict:
-    """任务详情:succeeded 的 image 任务把 result_url 解析成数组返回 result_urls。"""
+    """任务详情:媒体任务把单个或 JSON 数组 result_url 统一为 result_urls。"""
     item = task_to_item(task)
-    if task.task_type == "image" and task.result_url:
+    if task.task_type in {"image", "audio_clone", "video"} and task.result_url:
         try:
             urls = json.loads(task.result_url)
             item["result_urls"] = urls if isinstance(urls, list) else [task.result_url]

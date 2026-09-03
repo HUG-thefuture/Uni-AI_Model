@@ -16,7 +16,6 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
-from ..core.request_id import current_request_id
 from ..core.response import APIError
 from ..models.ai_task import AiTask
 from ..models.model import Model
@@ -68,7 +67,7 @@ async def save_upload(file: UploadFile) -> dict:
         raise APIError(400, "文件内容与类型不符")
 
     filename = f"{uuid.uuid4().hex[:12]}-{raw_name}"
-    upload_dir = Path(get_settings().upload_dir)
+    upload_dir = get_settings().upload_path
     await asyncio.to_thread(upload_dir.mkdir, parents=True, exist_ok=True)
     await asyncio.to_thread((upload_dir / filename).write_bytes, content)
     return {"url": f"/static/{filename}", "filename": filename, "size": len(content)}
@@ -106,7 +105,7 @@ def check_duration(params: dict, model: Model) -> None:
 
 
 def submit_av_task(db: Session, user: User, model: Model, task_type: str,
-                   prompt: str | None, params: dict) -> AiTask:
+                   prompt: str | None, params: dict, request_id: str) -> AiTask:
     """四态提交通道:幂等 409 → 冻结 → 建 pending 任务,与图像任务同链路。
 
     只做落库,不启动后台执行——本函数会被路由经 run_db 放线程池调用,
@@ -114,7 +113,7 @@ def submit_av_task(db: Session, user: User, model: Model, task_type: str,
     """
     dup = (
         db.query(AiTask)
-        .filter(AiTask.request_id == current_request_id(), AiTask.user_id == user.id)
+        .filter(AiTask.request_id == request_id, AiTask.user_id == user.id)
         .first()
     )
     if dup is not None:
@@ -122,7 +121,7 @@ def submit_av_task(db: Session, user: User, model: Model, task_type: str,
     check_duration(params, model)
     billing.freeze(db, user.id, model.price_per_call)  # 余额不足 409「积分不足,请先充值」
     task = AiTask(
-        request_id=current_request_id(), user_id=user.id, model_id=model.id,
+        request_id=request_id, user_id=user.id, model_id=model.id,
         task_type=task_type, prompt=prompt,
         params_json=json.dumps(params, ensure_ascii=False),
         status="pending", cost_status="frozen", cost=model.price_per_call,

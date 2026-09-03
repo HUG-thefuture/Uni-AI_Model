@@ -9,7 +9,7 @@ from ..core.db import Base
 class Invoice(Base):
     __tablename__ = "invoices"
     __table_args__ = (
-        Index('idx_user_created', 'user_id', 'created_at'),
+        Index('idx_invoice_user_created', 'user_id', 'created_at'),
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
 

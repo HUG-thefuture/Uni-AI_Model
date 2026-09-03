@@ -34,6 +34,7 @@
     videoImage: null,
     activeVideoTaskId: null,
     audioHistory: [],
+    activeAudioTaskId: null,
     videoHistory: [],
     tasks: [],
     busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false }
@@ -80,6 +81,13 @@
     return models.find(item => item.id === state.selectedModelIds[type]) || models.find(item => item.modelType === type);
   }
 
+  function taskKind(taskType) {
+    if (taskType === 'image') return 'image';
+    if (taskType === 'video') return 'video';
+    if (taskType === 'audio' || taskType === 'audio_clone' || taskType === 'asr') return 'audio';
+    return taskType || '';
+  }
+
   function remoteRecord(kind, response, title, mode, meta) {
     const record = {
       id: response.task_id, title, mode, meta,
@@ -90,6 +98,7 @@
     state.tasks.unshift(Object.assign({}, record));
     if (kind === 'image') state.activeImageTaskId = String(record.id);
     if (kind === 'video') state.activeVideoTaskId = String(record.id);
+    if (kind === 'audio') state.activeAudioTaskId = String(record.id);
     pollTask(record);
     return record;
   }
@@ -152,16 +161,27 @@
 
   function loadTaskHistory() {
     if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return Promise.resolve();
-    return window.PortalApi.taskList({ page: 1, page_size: 100 }).then(data => {
-      const rows = Array.isArray(data && data.items) ? data.items : [];
-      state.tasks = rows.map(item => { const record = { id: item.id, title: item.prompt || `任务 #${item.id}`, mode: item.task_type, meta: '', createdAt: item.created_at || '', status: item.status, error: item.error_message || '', resultText: item.result_text || '', resultUrls: [] }; applyTaskDetail(record, item); return record; });
-      state.imageHistory = state.tasks.filter(item => item.mode === 'image');
+    return loadAllTaskPages().then(rows => {
+      state.tasks = rows.map(item => { const record = { id: item.id, title: item.prompt || `任务 #${item.id}`, kind: taskKind(item.task_type), mode: item.task_type, meta: '', createdAt: item.created_at || '', status: item.status, error: item.error_message || '', resultText: item.result_text || '', resultUrls: [] }; applyTaskDetail(record, item); return record; });
+      state.imageHistory = state.tasks.filter(item => item.kind === 'image');
       if (!state.activeImageTaskId && state.imageHistory[0]) state.activeImageTaskId = String(state.imageHistory[0].id);
-      state.audioHistory = state.tasks.filter(item => ['audio_clone', 'asr'].includes(item.mode));
-      state.videoHistory = state.tasks.filter(item => item.mode === 'video');
+      state.audioHistory = state.tasks.filter(item => item.kind === 'audio');
+      if (!state.activeAudioTaskId && state.audioHistory[0]) state.activeAudioTaskId = String(state.audioHistory[0].id);
+      state.videoHistory = state.tasks.filter(item => item.kind === 'video');
       if (!state.activeVideoTaskId && state.videoHistory[0]) state.activeVideoTaskId = String(state.videoHistory[0].id);
       startTaskMonitor();
     }).catch(() => undefined);
+  }
+
+  function loadAllTaskPages(page, collected) {
+    const currentPage = page || 1;
+    const results = collected || [];
+    return window.PortalApi.taskList({ page: currentPage, page_size: 100 }).then(data => {
+      const rows = Array.isArray(data && data.items) ? data.items : [];
+      const all = results.concat(rows);
+      const total = Number(data && data.total) || all.length;
+      return all.length < total && rows.length ? loadAllTaskPages(currentPage + 1, all) : all;
+    });
   }
 
   function startTaskMonitor() {
@@ -171,18 +191,20 @@
         const rows = Array.isArray(data && data.items) ? data.items : [];
         const previous = new Map(state.tasks.map(item => [String(item.id), item]));
         rows.forEach(item => {
-          const record = previous.get(String(item.id)) || { id: item.id, title: item.prompt || `任务 #${item.id}`, mode: item.task_type, meta: '', createdAt: item.created_at || '' };
+          const record = previous.get(String(item.id)) || { id: item.id, title: item.prompt || `任务 #${item.id}`, kind: taskKind(item.task_type), mode: item.task_type, meta: '', createdAt: item.created_at || '' };
           applyTaskDetail(record, item);
           record.status = item.status || record.status;
           record.error = item.error_message || '';
           record.title = record.title || item.prompt || `任务 #${item.id}`;
+          record.kind = taskKind(item.task_type);
           previous.set(String(item.id), record);
         });
         state.tasks = Array.from(previous.values()).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-        state.imageHistory = state.tasks.filter(item => item.mode === 'image');
+        state.imageHistory = state.tasks.filter(item => item.kind === 'image');
         if (!state.activeImageTaskId && state.imageHistory[0]) state.activeImageTaskId = String(state.imageHistory[0].id);
-        state.audioHistory = state.tasks.filter(item => ['audio_clone', 'asr'].includes(item.mode));
-        state.videoHistory = state.tasks.filter(item => item.mode === 'video');
+        state.audioHistory = state.tasks.filter(item => item.kind === 'audio');
+        if (!state.activeAudioTaskId && state.audioHistory[0]) state.activeAudioTaskId = String(state.audioHistory[0].id);
+        state.videoHistory = state.tasks.filter(item => item.kind === 'video');
         if (!state.activeVideoTaskId && state.videoHistory[0]) state.activeVideoTaskId = String(state.videoHistory[0].id);
         const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#image-form, #audio-form, #video-form');
         if (!editing && ['image', 'audio', 'video', 'tasks', 'profile'].includes(state.route)) render();
@@ -444,11 +466,13 @@
   }
 
   function audioView() {
-    const running = state.audioHistory[0] && ['pending', 'processing'].includes(state.audioHistory[0].status);
-    const complete = state.audioHistory[0] && ['succeeded', 'success'].includes(state.audioHistory[0].status);
+    const current = state.audioHistory.find(item => String(item.id) === String(state.activeAudioTaskId)) || state.audioHistory[0];
+    const running = current && ['pending', 'processing'].includes(current.status);
+    const complete = current && ['succeeded', 'success'].includes(current.status);
+    const failed = current && current.status === 'failed';
     const voices = [['龙安洋', '阳光大男孩 · 中英双语'], ['龙安欢', '欢脱元气女 · 中英双语'], ['清雅老师', '知性女声 · 普通话'], ['星河少年', '沉稳男声 · 普通话']];
     return `${pageHead('声音创作坊', '将文字转成自然语音，并保留每一次创作的任务记录。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${complete ? '服务端音频结果已返回，可直接播放或下载。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? (state.audioHistory[0].resultUrls && state.audioHistory[0].resultUrls[0] ? `<audio controls preload="metadata" src="${escapeHtml(resultUrl(state.audioHistory[0].resultUrls[0]))}"></audio>` : '任务完成，但服务端未返回音频地址。') : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${failed ? '音频生成失败' : complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查后重试。') : complete ? '服务端音频结果已返回，可直接播放或下载。' : running ? '任务已提交，正在等待模型服务处理。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? (current.resultUrls && current.resultUrls[0] ? `<audio controls preload="metadata" src="${escapeHtml(resultUrl(current.resultUrls[0]))}"></audio>` : '任务完成，但服务端未返回音频地址。') : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : running ? escapeHtml(current.title) : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
         <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} cosyvoice-v3-plus <small>¥1.2 / 万字符</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="声音创作模式">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" aria-pressed="${state.audioMode === item}" ${item === '声音合成' ? `data-audio-mode="${item}"` : 'disabled aria-disabled="true" title="接口字段确认后开放"'}>${item}${item === '声音合成' ? '' : ' · 待开放'}</button>`).join('')}</div><div class="form-block"><label class="field-label" for="audio-text">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" aria-describedby="audio-count" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count" aria-live="polite">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label" for="audio-speed">语速</label><input class="field" id="audio-speed" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label" for="audio-format">音频格式</label><select class="select-field" id="audio-format"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><span class="field-label" id="voice-label">选择配音员</span><div class="audio-voice-grid" role="group" aria-labelledby="voice-label">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}" aria-pressed="${state.selectedVoice === name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div><button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : (window.PortalConfig.demoMode ? '生成音频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '文本包含“#失败”可验证失败任务和重新提交。' : '真实声音接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">模式</th><th scope="col">时长/字数</th><th scope="col">完成时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.audioHistory, '创作')}</tbody></table></div></section>`;
   }
@@ -458,8 +482,9 @@
     const running = current && ['pending', 'processing'].includes(current.status);
     const complete = current && ['succeeded', 'success'].includes(current.status);
     const failed = current && current.status === 'failed';
+    const videoResults = complete && current && current.resultUrls ? current.resultUrls : [];
     return `${pageHead('视频合成站', '以文本、图片或音频条件组合成一段可控的短视频。')}
-      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview">${complete && current.resultUrls && current.resultUrls[0] ? `<video controls preload="metadata" src="${escapeHtml(resultUrl(current.resultUrls[0]))}" style="max-width:100%;max-height:420px"></video>` : `<div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${failed ? '视频生成失败' : complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查参数后重试。') : complete ? '服务端视频结果已返回。' : '生成完成后将在此显示结果。'}</span></div>`}</div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? escapeHtml(current.title) : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : '无首帧时将采用文生视频模型。'}</div></div>
+      <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview">${videoResults.length ? videoResults.map((url, index) => `<figure style="margin:0 0 16px"><video controls preload="metadata" src="${escapeHtml(resultUrl(url))}" style="width:100%;max-height:420px"></video><figcaption class="preview-caption">结果 ${index + 1} · <a href="${escapeHtml(resultUrl(url))}" target="_blank" rel="noopener">在新窗口打开/下载</a></figcaption></figure>`).join('') : `<div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${failed ? '视频生成失败' : complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查参数后重试。') : complete ? '服务端未返回可播放的视频地址。' : '生成完成后将在此显示结果。'}</span></div>`}</div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? `${escapeHtml(current.title)}${videoResults.length > 1 ? ` · 共 ${videoResults.length} 个结果` : ''}` : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : '无首帧时将采用文生视频模型。'}</div></div>
         <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} wanx2.1-vace-plus <small>视频生成</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="form-block"><label class="field-label" for="video-prompt">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label" for="video-negative">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><span class="field-label" id="video-duration-label">视频时长</span><div class="duration-row" role="group" aria-labelledby="video-duration-label">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}" aria-pressed="${state.videoDuration === item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label" for="video-resolution">分辨率</label><select class="select-field" id="video-resolution"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><span class="field-label">音频设置</span><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : (window.PortalConfig.demoMode ? '文生视频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '提示词包含“#失败”可验证失败任务和重新提交。' : '真实视频接口尚未挂载，当前不会提交或生成本地假任务。'}</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">合成模式</th><th scope="col">时长</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.videoHistory, '创作')}</tbody></table></div></section>`;
   }
@@ -757,12 +782,15 @@
           .finally(() => { state.busy.video = false; render(); });
       });
     }
-    $('[data-retry]').on('click', function () { const id = String($(this).data('retry')); if (!window.PortalConfig.demoMode) { return window.PortalApi.taskRetry(id).then(result => { const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id); if (record) { record.status = result.status; record.error = ''; pollTask(record); } toast('任务已重新提交。', 'success'); render(); }).catch(error => toast(error && error.message ? error.message : '任务重试失败。', 'error')); } let record; ['imageHistory', 'audioHistory', 'videoHistory'].some(key => { record = state[key].find(item => String(item.id) === id); return Boolean(record); }); if (!record) return toast('没有找到需要重试的任务。', 'error'); record.status = 'pending'; record.error = ''; record.shouldFail = false; record.attempts = (record.attempts || 1) + 1; const mirror = state.tasks.find(item => String(item.id) === id); if (mirror) Object.assign(mirror, record); persistDemoState(); scheduleDemoTask(record, true); toast('任务已重新提交，本次演示将正常完成。', 'success'); render(); });
+    $('[data-retry]').on('click', function () { const id = String($(this).data('retry')); if (!window.PortalConfig.demoMode) { return window.PortalApi.taskRetry(id).then(result => { const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id); if (record) { record.status = result.status; record.error = ''; if (record.kind === 'image') state.activeImageTaskId = id; if (record.kind === 'audio') state.activeAudioTaskId = id; if (record.kind === 'video') state.activeVideoTaskId = id; pollTask(record); } toast('任务已重新提交。', 'success'); render(); }).catch(error => toast(error && error.message ? error.message : '任务重试失败。', 'error')); } let record; ['imageHistory', 'audioHistory', 'videoHistory'].some(key => { record = state[key].find(item => String(item.id) === id); return Boolean(record); }); if (!record) return toast('没有找到需要重试的任务。', 'error'); record.status = 'pending'; record.error = ''; record.shouldFail = false; record.attempts = (record.attempts || 1) + 1; if (record.kind === 'image') state.activeImageTaskId = id; if (record.kind === 'audio') state.activeAudioTaskId = id; if (record.kind === 'video') state.activeVideoTaskId = id; const mirror = state.tasks.find(item => String(item.id) === id); if (mirror) Object.assign(mirror, record); persistDemoState(); scheduleDemoTask(record, true); toast('任务已重新提交，本次演示将正常完成。', 'success'); render(); });
     $('[data-view-task]').on('click', function () {
       const id = String($(this).data('view-task'));
       const record = [...state.imageHistory, ...state.audioHistory, ...state.videoHistory].find(item => String(item.id) === id);
       if (!record) return toast('没有找到该任务，可能已被清理。', 'error');
-      if (state.route === record.kind) return toast('当前页面已经显示该任务的最新状态。');
+      if (record.kind === 'image') state.activeImageTaskId = id;
+      if (record.kind === 'audio') state.activeAudioTaskId = id;
+      if (record.kind === 'video') state.activeVideoTaskId = id;
+      if (state.route === record.kind) return render();
       setRoute(record.kind);
     });
     $('#clear-demo-history').on('click', function () { if (!window.confirm('确定清空全部演示任务记录吗？此操作无法撤销。')) return; state.imageHistory = []; state.audioHistory = []; state.videoHistory = []; state.tasks = []; taskTimers.forEach(timers => timers.forEach(timer => clearTimeout(timer))); taskTimers.clear(); persistDemoState(); toast('演示任务记录已清空。', 'success'); render(); });

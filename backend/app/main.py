@@ -6,21 +6,29 @@
 """
 import logging
 import sys
+import asyncio
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.request_id import RequestIdMiddleware
 from app.core.response import ok, register_exception_handlers
+from app.bootstrap import startup_initialize
 
 
-from app.routers import (admin_users, api_key, auth, chat, models, stats, tasks, user, wallet,admin_wallet)
+from app.routers import (admin_users, api_key, auth, chat, models, stats, tasks, uploads, user, wallet,admin_wallet)
 
 from fastapi.middleware.cors import CORSMiddleware
 
 
-
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """在线程中执行同步初始化，避免阻塞应用事件循环。"""
+    await asyncio.to_thread(startup_initialize)
+    yield
 
 
 def create_app() -> FastAPI:
@@ -31,14 +39,22 @@ def create_app() -> FastAPI:
         stream=sys.stdout,
     )
 
-    app = FastAPI(title="AI 大模型门户", version="0.1.0", docs_url=f"{settings.api_prefix}/docs")
+    app = FastAPI(
+        title="AI 大模型门户", version="0.1.0",
+        docs_url=f"{settings.api_prefix}/docs", lifespan=lifespan,
+    )
+    # 所有上传和模型生成的本地产物均通过同一绝对目录暴露，避免运行目录不同导致 404。
+    settings.upload_path.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(settings.upload_path)), name="static")
     #CORS:前后端分离联调
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
+            "null",  # file:// 方式打开前端时浏览器发送 Origin: null
             "http://127.0.0.1:63342",
             "http://localhost:63342"
         ],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -63,6 +79,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router, prefix=settings.api_prefix)
     app.include_router(chat.router, prefix=settings.api_prefix)
     app.include_router(tasks.router, prefix=settings.api_prefix)
+    app.include_router(uploads.router, prefix=settings.api_prefix)
 
 
   

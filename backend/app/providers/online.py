@@ -163,7 +163,7 @@ class OnlineProvider(BaseProvider):
             validate=validate,
         )
         data = resp.json()
-        upload_dir = Path(get_settings().upload_dir)
+        upload_dir = get_settings().upload_path
         upload_dir.mkdir(parents=True, exist_ok=True)
         urls: list[str] = []
         # SiliconFlow 当前返回 images；兼容 OpenAI 风格 data，避免上游版本差异导致结果丢失。
@@ -201,7 +201,7 @@ class OnlineProvider(BaseProvider):
 
         if audio_url.startswith("/static/"):
             filename = Path(audio_url).name  # 只取文件名,防目录穿越
-            path = Path(get_settings().upload_dir) / filename
+            path = get_settings().upload_path / filename
             if not path.is_file():
                 raise ProviderError("invalid_audio", "音频文件不存在,请重新上传", audio_url)
             return path.read_bytes(), filename
@@ -287,7 +287,7 @@ class OnlineProvider(BaseProvider):
         if not resp.content:
             raise ProviderError("provider_bad_response", "声音服务未返回音频内容", resp.text[:200])
         filename = f"clone-{current_request_id()}.mp3"
-        upload_dir = Path(get_settings().upload_dir)
+        upload_dir = get_settings().upload_path
         upload_dir.mkdir(parents=True, exist_ok=True)
         try:
             (upload_dir / filename).write_bytes(resp.content)
@@ -380,7 +380,7 @@ class OnlineProvider(BaseProvider):
         mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(suffix)
         if not mime:
             raise ProviderError("invalid_image", "首帧仅支持 PNG 或 JPG 图片")
-        path = Path(get_settings().upload_dir) / filename
+        path = get_settings().upload_path / filename
         if not path.is_file():
             raise ProviderError("invalid_image", "首帧图片不存在，请重新上传")
         try:
@@ -405,10 +405,10 @@ class OnlineProvider(BaseProvider):
         status = str(data.get("status") or "")
         if status == "Succeed":
             videos = ((data.get("results") or {}).get("videos") or [])
-            url = videos[0].get("url") if videos and isinstance(videos[0], dict) else None
-            if not url:
+            urls = [item.get("url") for item in videos if isinstance(item, dict) and item.get("url")]
+            if not urls:
                 raise ProviderError("provider_bad_response", "视频服务未返回视频地址", resp.text[:500])
-            return {"status": "completed", "video_url": url}
+            return {"status": "completed", "video_url": urls[0], "video_urls": urls}
         if status == "Failed":
             raise ProviderError("provider_failed", str(data.get("reason") or "视频生成失败"))
         return {"status": "processing"}

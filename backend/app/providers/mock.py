@@ -130,7 +130,7 @@ class MockProvider(BaseProvider):
 
             from app.core.config import get_settings
 
-            upload_dir = Path(get_settings().upload_dir)
+            upload_dir = get_settings().upload_path
             upload_dir.mkdir(parents=True, exist_ok=True)
             filename = f"clone-mock-{_uuid.uuid4().hex[:12]}.mp3"
             (upload_dir / filename).write_bytes(MOCK_MP3_BYTES)

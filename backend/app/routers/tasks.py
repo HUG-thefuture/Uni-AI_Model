@@ -154,7 +154,10 @@ async def create_audio_clone_task(body: AudioCloneTaskCreate,
         "duration_sec": body.duration_sec,
     }
     params = {k: v for k, v in params.items() if v is not None}
-    task = await run_db(av_service.submit_av_task, db, user, model, "audio_clone", body.text, params)
+    task = await run_db(
+        av_service.submit_av_task, db, user, model, "audio_clone", body.text, params,
+        current_request_id(),
+    )
     task_service.start_background_task(task.id)
     return ok({"task_id": task.id, "status": task.status})
 
@@ -168,7 +171,10 @@ async def create_audio_asr_task(body: AudioAsrTaskCreate,
     params = {"audio_url": body.audio_url}
     if body.duration_sec is not None:
         params["duration_sec"] = body.duration_sec
-    task = await run_db(av_service.submit_av_task, db, user, model, "asr", body.audio_url, params)
+    task = await run_db(
+        av_service.submit_av_task, db, user, model, "asr", body.audio_url, params,
+        current_request_id(),
+    )
     task_service.start_background_task(task.id)
     return ok({"task_id": task.id, "status": task.status})
 
@@ -183,7 +189,10 @@ async def create_video_task(body: VideoTaskCreate,
     params = body.params.model_dump(exclude_none=True) if body.params else {}
     if params.get("image_url") and "I2V" not in model.model_code.upper():
         raise APIError(409, "上传首帧后请在模型广场选择图生视频模型")
-    task = await run_db(av_service.submit_av_task, db, user, model, "video", body.text, params)
+    task = await run_db(
+        av_service.submit_av_task, db, user, model, "video", body.text, params,
+        current_request_id(),
+    )
     task_service.start_background_task(task.id)
     return ok({"task_id": task.id, "status": task.status})
 
