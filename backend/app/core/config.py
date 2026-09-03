@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # --- 模型密钥(选填,懒校验) ---
     siliconflow_api_key: str = ""
+    dashscope_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
     # --- Provider 超时与重试 ---
@@ -77,6 +78,12 @@ class Settings(BaseSettings):
             "audio": self.provider_read_timeout_av,
             "video": self.provider_read_timeout_av,
         }
+
+    @property
+    def upload_path(self) -> Path:
+        """上传与生成产物的绝对目录,不随 uvicorn 启动目录变化。"""
+        path = Path(self.upload_dir)
+        return path if path.is_absolute() else BASE_DIR / path
 
 
 @lru_cache

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas.auth import User_out, Register_req, Login_req, Profile_res
-from app.core.response import ok
-from app.core.db import get_async_db
-from app.schemas.wallet import WalletResponse
-from app.services import auth as auth_service
-from app.models.user import User, get_current_user, UserProfile,Wallet
+from ..schemas.auth import User_out, Register_req, Login_req, Profile_res
+from ..core.response import ok
+from ..core.db import get_async_db
+from ..core.deps import get_current_user
+from ..schemas.wallet import WalletResponse
+from ..services import auth as auth_service
+from ..models.user import User, UserProfile, Wallet
 from sqlalchemy import select
 
 

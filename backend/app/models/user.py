@@ -1,13 +1,7 @@
-from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint, func
-from fastapi import  Depends
-from ..core.response import APIError
-from ..core.security import decode_token
+from sqlalchemy import BigInteger, Index, Integer, SmallInteger, String, UniqueConstraint
 from .base import TimestampMixin, pk_column
-from ..core.db import Base, get_async_db
-from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
+from ..core.db import Base
 
 
 
@@ -69,55 +63,20 @@ class Wallet(TimestampMixin,Base):
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
     # 逻辑外键，直接作为主键
-    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, comment="逻辑外键 users.id")
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=False, comment="逻辑外键 users.id"
+    )
     # 金额单位为“分”，所以用 Integer 或 BigInteger
-    balance: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="可用余额(分)")
-    total_recharged: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="累计充值金额(分)")
-    total_consumed: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="累计消费金额(分)")
+    balance: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(分)"
+    )
+    total_recharged: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0", comment="累计充值金额(分)"
+    )
+    total_consumed: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0", comment="累计消费金额(分)"
+    )
     # 乐观锁版本号，防并发扣减
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="乐观锁版本号")
-
-    # created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
-    # updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(),
-    #                                              comment="更新时间")
-# class Wallet(TimestampMixin, Base):
-#     """钱包表:user_id 为主键,注册时余额 0。"""
-#
-#     __tablename__ = "wallets"
-#     __table_args__ = {"comment": "钱包表(金额单位:分,整数)"}
-#
-#     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, comment="主键,逻辑外键 users.id")
-#     balance: Mapped[int] = mapped_column(
-#         BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(分)"
-#     )
-#     total_recharged: Mapped[int] = mapped_column(
-#         BigInteger, nullable=False, default=0, server_default="0", comment="累计充值(分)"
-#     )
-#     total_consumed: Mapped[int] = mapped_column(
-#         BigInteger, nullable=False, default=0, server_default="0", comment="累计消费(分)"
-#     )
-#     version: Mapped[int] = mapped_column(
-#         Integer, nullable=False, default=0, server_default="0", comment="乐观锁版本号"
-#     )
-
-
-
-bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
-async def get_current_user(
-credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_async_db),
-) -> User:
-    if credentials is None:
-        raise APIError(401,"未登录或凭证无效")
-    try:
-        head = decode_token(credentials.credentials)
-        user_id = int(head["sub"])
-    except Exception:
-        raise APIError(401, "登录凭证无效或已过期") from None
-
-    user = await db.get(User, user_id)
-    if user is None:
-        raise APIError(401, "未登录或凭证失效")
-    if user.status != 1:
-        raise APIError(403, "账号已被禁用")
-    return user
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0", comment="乐观锁版本号"
+    )

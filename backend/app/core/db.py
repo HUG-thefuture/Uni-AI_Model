@@ -11,17 +11,12 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from typing import TypeVar
 
 T = TypeVar("T")
-from fastapi import Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings
-from app.core.response import APIError
-from app.core.security import decode_token
-# from app.models.user import User
+from .config import get_settings
 
 class Base(DeclarativeBase):
     pass
@@ -87,7 +82,7 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
 
 def init_db() -> None:
     """建表(注册全部模型映射)。"""
-    from app.models import ai_call_log, ai_task, model, user,api_key,consumption_record,operation_log,recharge_order  # noqa: F401 注册映射
+    from ..models import ai_call_log, ai_task, model, user, api_key, consumption_record, operation_log, recharge_order  # noqa: F401 注册映射
 
     Base.metadata.create_all(bind=engine)
 
@@ -95,30 +90,4 @@ def init_db() -> None:
 async def run_db(fn: Callable[..., T], /, *args, **kwargs) -> T:
     """在线程池执行同步数据库操作，避免阻塞事件循环。"""
     return await asyncio.to_thread(fn, *args, **kwargs)
-
-
-#获取解析 token → 查用户 → 校验未禁用
-# bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
-# async def get_current_user(
-# credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-#     db: AsyncSession = Depends(get_async_db),
-# ) -> User:
-#     if credentials is None:
-#         raise APIError(401,"未登录或凭证无效")
-#     try:
-#         head = decode_token(credentials.credentials)
-#         user_id = int(head["sub"])
-#     except Exception:
-#         raise APIError(401, "登录凭证无效或已过期") from None
-#
-#     user = await db.get(User, user_id)
-#     if user is None:
-#         raise APIError(401, "未登录或凭证失效")
-#     if user.status != 1:
-#         raise APIError(403, "账号已被禁用")
-#     return user
-
-
-
-
 

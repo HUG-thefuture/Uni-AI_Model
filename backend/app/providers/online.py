@@ -237,7 +237,7 @@ class OnlineProvider(BaseProvider):
         import uuid as _uuid
         from pathlib import Path
 
-        from app.core.request_id import current_request_id
+        from ..core.request_id import current_request_id
 
         key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
         params = params or {}

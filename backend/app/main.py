@@ -15,7 +15,19 @@ from fastapi.staticfiles import StaticFiles
 from .core.config import get_settings
 from .core.request_id import RequestIdMiddleware
 from .core.response import ok, register_exception_handlers
-from .routers import admin_models, api_key, auth, chat, models, open_api, stats, tasks, uploads
+from .routers import (
+    admin_models,
+    admin_users,
+    api_key,
+    auth,
+    chat,
+    models,
+    open_api,
+    stats,
+    tasks,
+    uploads,
+    user,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -43,18 +55,22 @@ def create_app() -> FastAPI:
         """存活探针:供 Nginx/Supervisor 与每日集成验收使用。"""
         return ok(data={"status": "up", "service": "ai-portal-backend"})
 
-    os.makedirs(settings.upload_dir, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=settings.upload_dir), name="static")
+    # 所有上传和模型生成的本地产物均通过同一绝对目录暴露,避免运行目录不同导致 404。
+    settings.upload_path.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(settings.upload_path)), name="static")
 
     app.include_router(auth.router, prefix=settings.api_prefix)
+    app.include_router(user.router, prefix=settings.api_prefix)
+    app.include_router(admin_users.router, prefix=settings.api_prefix)
     for prefix in (settings.api_prefix, "/api/v1"):
         app.include_router(models.router, prefix=prefix)
         app.include_router(admin_models.router, prefix=prefix)
         app.include_router(chat.router, prefix=prefix)
         app.include_router(tasks.router, prefix=prefix)
-        app.include_router(open_api.router, prefix=prefix)
         app.include_router(uploads.router, prefix=prefix)
         app.include_router(stats.router, prefix=prefix)
+    # open_api 自带 /v1/chat/completions 别名，只挂一次可避免 /api/v1 路径重复。
+    app.include_router(open_api.router, prefix=settings.api_prefix)
     from .routers import wallet
     app.include_router(wallet.router)
     app.include_router(api_key.router)
@@ -65,4 +81,4 @@ app = create_app()
 
 # 测试
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8004)

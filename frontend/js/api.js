@@ -141,17 +141,103 @@
     currentUser() {
       return request({ url: '/api/auth/me' });
     },
+    wallet() {
+      return request({ url: '/api/wallet/me' });
+    },
+    walletRecords(params) {
+      return request({ url: `/api/wallet/records${params ? `?${$.param(params)}` : ''}` });
+    },
+    recharge(payload) {
+      return request({ url: '/api/wallet/recharge', method: 'POST', data: payload });
+    },
+    invoices(params) {
+      return request({ url: `/api/wallet/invoices${params ? `?${$.param(params)}` : ''}` });
+    },
+    createInvoice(payload) {
+      return request({ url: '/api/wallet/invoices', method: 'POST', data: payload });
+    },
     updateProfile(payload) {
       return request({ url: '/api/user/profile', method: 'PUT', data: payload });
     },
     models(params) {
       return request({ url: `/api/models${params ? `?${$.param(params)}` : ''}` });
     },
+    chatSession(payload) {
+      return request({ url: '/api/chat/sessions', method: 'POST', data: payload });
+    },
+    streamText(payload, onEvent) {
+      const currentToken = token();
+      const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
+      if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+      return fetch(`${config.apiBase}/api/tasks/text`, {
+        method: 'POST', headers, body: JSON.stringify(payload)
+      }).then(async response => {
+        if (!response.ok) {
+          let body = {};
+          try { body = await response.json(); } catch (error) { /* 保留统一错误提示 */ }
+          if (response.status === 401) { clearToken(); notifyUnauthorized({ requestId: body.request_id }); }
+          throw { status: response.status, code: body.code, message: errorMessage(response.status, body.message), requestId: body.request_id };
+        }
+        if (!response.body) throw { message: '浏览器不支持流式响应，请升级浏览器后重试。' };
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          pending += decoder.decode(chunk.value, { stream: true });
+          const frames = pending.split('\n\n');
+          pending = frames.pop();
+          for (const frame of frames) {
+            const line = frame.split('\n').find(item => item.startsWith('data:'));
+            if (!line) continue;
+            let event;
+            try { event = JSON.parse(line.slice(5).trim()); } catch (error) { continue; }
+            if (event.error) throw { code: event.error.code, message: event.error.message || '模型生成失败。' };
+            onEvent(event);
+          }
+        }
+        if (pending.trim()) {
+          const line = pending.split('\n').find(item => item.startsWith('data:'));
+          if (line) {
+            const event = JSON.parse(line.slice(5).trim());
+            if (event.error) throw { code: event.error.code, message: event.error.message || '模型生成失败。' };
+            onEvent(event);
+          }
+        }
+      });
+    },
     task(type, payload) {
       return request({ url: `/api/tasks/${type}`, method: 'POST', data: payload, timeout: type === 'text' ? 120000 : 30000 });
     },
+    upload(file) {
+      const currentToken = token();
+      const headers = {};
+      if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+      const form = new FormData();
+      form.append('file', file);
+      return new Promise((resolve, reject) => {
+        $.ajax({
+          url: `${config.apiBase}/api/uploads`, method: 'POST', headers, data: form,
+          processData: false, contentType: false, dataType: 'json', timeout: 60000
+        }).done(response => {
+          if (response && response.code === 0) return resolve(response.data);
+          reject({ status: 200, message: response && response.message ? response.message : '上传接口返回格式不符合约定' });
+        }).fail(xhr => {
+          const response = xhr.responseJSON || {};
+          if (xhr.status === 401) { clearToken(); notifyUnauthorized({ requestId: response.request_id }); }
+          reject({ status: xhr.status || 0, message: errorMessage(xhr.status, response.message) });
+        });
+      });
+    },
+    taskList(params) {
+      return request({ url: `/api/tasks` + (params ? `?${$.param(params)}` : '') });
+    },
     taskDetail(id) {
       return request({ url: `/api/tasks/${encodeURIComponent(id)}` });
+    },
+    taskRetry(id) {
+      return request({ url: `/api/tasks/${encodeURIComponent(id)}/retry`, method: 'POST' });
     }
   };
 }());

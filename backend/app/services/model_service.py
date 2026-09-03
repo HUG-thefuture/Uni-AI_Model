@@ -96,7 +96,7 @@ def _model_available(model: Model) -> bool:
       拖慢列表接口(mock 本就不发起外部请求,恒可用)。
     """
     if model.provider_type == "local":
-        from app.providers.local import LocalProvider
+        from ..providers.local import LocalProvider
 
         try:
             return LocalProvider.probe_available(model.endpoint)

@@ -1,10 +1,6 @@
-"""建表入口:python -m app.init_db(在 backend/ 目录下执行)。
-
-创建成员2负责的 models / ai_tasks / ai_call_logs 三张表;
-users 等成员1/4 的表请使用 sql/ 目录下的建表 SQL。
-"""
-from .core.db import init_db
+"""建表入口：在 backend/ 目录执行 ``python -m app.init_db``。"""
+from .core.db import Base, init_db
 
 if __name__ == "__main__":
     init_db()
-    print("建表完成:models / ai_tasks / ai_call_logs")
+    print("建表完成:" + ", ".join(sorted(Base.metadata.tables)))

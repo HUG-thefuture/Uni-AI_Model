@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.response import APIError
 from ..services import api_key
 from ..core.db import get_async_db
-from ..models.user import get_current_user
+from ..core.deps import get_current_user
 from ..schemas.api_key import ApiKeyCreate,ApiKeyCreateResponse, ApiKeyListResponse, ApiKeyStatusUpdate
 
 router = APIRouter(
