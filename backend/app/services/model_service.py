@@ -23,8 +23,18 @@ from ..models.support import OperationLog
 # 全组冻结的合法枚举值
 VALID_PROVIDER_TYPES = ("online", "local")
 VALID_MODEL_TYPES = ("text", "image", "audio", "video")
-VALID_VENDORS = ("siliconflow", "ollama", "mock")
+VALID_VENDORS = ("siliconflow", "dashscope", "ollama", "mock")
 VALID_STATUSES = ("enabled", "disabled")
+
+# vendor 与 provider_type 的对应关系(与实际生产环境对齐):
+# - siliconflow / dashscope / mock 为云端(online)供应商;
+# - ollama 为本地(local)供应商。
+VENDOR_PROVIDER_TYPE = {
+    "siliconflow": "online",
+    "dashscope": "online",
+    "ollama": "local",
+    "mock": "online",
+}
 
 # 删除前置校验:引用模型且尚未结束的任务状态
 BLOCKING_TASK_STATUSES = ("pending", "processing")
@@ -38,13 +48,18 @@ def _validate_enums(
     model_type: str | None = None,
     vendor: str | None = None,
 ) -> None:
-    """枚举合法性校验,非法返回 400(中文提示)。"""
+    """枚举合法性校验,非法返回 400(中文提示);并校验 vendor 与 provider_type 的匹配关系。"""
     if provider_type is not None and provider_type not in VALID_PROVIDER_TYPES:
         raise APIError(400, "provider_type 非法,仅支持 online/local")
     if model_type is not None and model_type not in VALID_MODEL_TYPES:
         raise APIError(400, "model_type 非法,仅支持 text/image/audio/video")
     if vendor is not None and vendor not in VALID_VENDORS:
-        raise APIError(400, "vendor 非法,仅支持 siliconflow/ollama/mock")
+        raise APIError(400, f"vendor 非法,仅支持 {'/'.join(VALID_VENDORS)}")
+    # vendor 与 provider_type 必须匹配(生产环境约束)
+    if vendor is not None and provider_type is not None and vendor in VENDOR_PROVIDER_TYPE:
+        expected = VENDOR_PROVIDER_TYPE[vendor]
+        if provider_type != expected:
+            raise APIError(400, f"vendor「{vendor}」与 provider_type「{provider_type}」不匹配,应为「{expected}」")
 
 
 def _normalize_config_json(config_json) -> str | None:
@@ -221,9 +236,11 @@ def list_admin_models(
 
 
 def create_model(db: Session, user_id: int, payload) -> Model:
-    """创建模型:枚举校验 + 唯一校验 + 写操作日志。"""
+    """创建模型:枚举校验 + 唯一校验 + 本地模型 endpoint 必填 + 写操作日志。"""
     _validate_enums(provider_type=payload.provider_type, model_type=payload.model_type,
                     vendor=payload.vendor)
+    if payload.provider_type == "local" and not payload.endpoint:
+        raise APIError(400, "本地模型必须填写 endpoint(如 Ollama 服务地址)")
     _ensure_unique(db, payload.model_code, payload.provider_type)
     model = Model(
         name=payload.name,
@@ -271,6 +288,9 @@ def update_model(db: Session, user_id: int, model_id: int, payload) -> Model:
 
     new_code = provided.get("model_code", model.model_code)
     new_provider = provided.get("provider_type", model.provider_type)
+    new_endpoint = provided.get("endpoint", model.endpoint)
+    if new_provider == "local" and not new_endpoint:
+        raise APIError(400, "本地模型必须填写 endpoint(如 Ollama 服务地址)")
     if new_code != model.model_code or new_provider != model.provider_type:
         _ensure_unique(db, new_code, new_provider, exclude_id=model.id)
 

@@ -15,7 +15,7 @@ class ModelCreateRequest(BaseModel):
     model_code: str = Field(min_length=1, max_length=200, description="厂商调用名")
     provider_type: str = Field(min_length=1, max_length=20, description="online / local")
     model_type: str = Field(min_length=1, max_length=20, description="text / image / audio / video")
-    vendor: str = Field(min_length=1, max_length=30, description="siliconflow / ollama / mock")
+    vendor: str = Field(min_length=1, max_length=30, description="siliconflow / dashscope / ollama / mock")
     endpoint: str | None = Field(default=None, max_length=255, description="自定义端点,本地模型用,可空")
     price_per_call: int = Field(ge=0, description="积分点/次,非负整数")
     max_duration_sec: int | None = Field(default=None, ge=0, description="音视频时长上限(秒),可空")
