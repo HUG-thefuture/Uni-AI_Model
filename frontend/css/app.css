@@ -283,3 +283,32 @@ button:disabled { cursor: not-allowed; }
   .invoice-info-card { grid-template-columns: 1fr; }
   .billing-pagination { align-items: flex-start; flex-direction: column; }
 }
+.table-wrap { overflow-x: auto; }
+.admin-tab-bar { margin-bottom: 4px; }
+.admin-tab-bar .tab-btn { white-space: nowrap; }
+.admin-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.billing-section-head { align-items: flex-start; }
+
+/* ===== 个人中心 · 用量统计 ===== */
+.usage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
+.usage-card { min-height: 148px; padding: 24px; }
+.usage-card-label { display: block; color: #536075; font-size: 13px; font-weight: 680; }
+.usage-card-value { display: inline-block; margin-top: 20px; color: var(--ink); font-size: 32px; font-weight: 760; letter-spacing: -.04em; }
+.usage-card-unit { margin-left: 6px; color: var(--muted); font-size: 13px; }
+.usage-card-note { margin: 14px 0 0; padding-top: 13px; border-top: 1px dashed #dbe3ef; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.usage-card-note .layui-icon { color: var(--primary); }
+.usage-empty { min-height: 130px; }
+.usage-load-error { margin-bottom: 16px; }
+@media (max-width: 760px) { .usage-grid { grid-template-columns: 1fr; } }
+
+/* ===== 个人中心 · API Key 管理 ===== */
+.api-key-reveal, .api-key-create-panel { margin-bottom: 18px; }
+.api-key-codebox { display: flex; align-items: center; gap: 12px; margin-top: 6px; padding: 12px 14px; border: 1px solid #dfe7f3; border-radius: 10px; background: #f5f8fd; }
+.api-key-code { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1c2a44; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; user-select: all; }
+.api-key-mask { padding: 2px 6px; border-radius: 6px; background: #eef1f6; color: #45506a; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 12px; letter-spacing: .02em; }
+.btn-quiet.danger { color: var(--danger); }
+.btn-quiet.danger:hover { background: var(--danger-soft); }
+.data-table tr[data-deleted="1"] { opacity: .55; }
+.data-table tr[data-deleted="1"] td { background: #fbfbfd; }
+.form-actions-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+

@@ -238,6 +238,89 @@
     },
     taskRetry(id) {
       return request({ url: `/api/tasks/${encodeURIComponent(id)}/retry`, method: 'POST' });
+    },
+
+    // ===== 个人中心 · 用量统计 =====
+    usageStats() {
+      return request({ url: '/api/stats/usage' });
+    },
+
+    // ===== 个人中心 · API Key 管理 =====
+    apiKeys() {
+      return request({ url: '/api/api_keys' });
+    },
+    createApiKey(payload) {
+      return request({ url: '/api/api_keys', method: 'POST', data: payload });
+    },
+    updateApiKeyStatus(id, status) {
+      return request({ url: `/api/api_keys/${encodeURIComponent(id)}/status`, method: 'PUT', data: { status } });
+    },
+
+    // ===== 管理后台 · 用户管理 =====
+    adminUsers(params) {
+      return request({ url: `/api/admin/users${params ? `?${$.param(params)}` : ''}` });
+    },
+    adminUserDetail(id) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}` });
+    },
+    adminUpdateUser(id, payload) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}`, method: 'PUT', data: payload });
+    },
+    adminUpdateUserStatus(id, status) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}/status`, method: 'PUT', data: { status } });
+    },
+    adminAdjustBalance(id, amount, reason) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}/balance`, method: 'PUT', data: { amount, reason } });
+    },
+    adminResetPassword(id, password) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}/password`, method: 'PUT', data: { password } });
+    },
+    adminDeleteUser(id) {
+      return request({ url: `/api/admin/users/${encodeURIComponent(id)}`, method: 'DELETE' });
+    },
+
+    // ===== 管理后台 · 钱包/订单/消费 =====
+    adminWallets(params) {
+      return request({ url: `/api/admin/wallets${params ? `?${$.param(params)}` : ''}` });
+    },
+    adminOrders(params) {
+      return request({ url: `/api/admin/orders${params ? `?${$.param(params)}` : ''}` });
+    },
+    adminConsumptions(params) {
+      return request({ url: `/api/admin/consumption-records${params ? `?${$.param(params)}` : ''}` });
+    },
+
+    // ===== 管理后台 · 发票审核 =====
+    adminInvoices(params) {
+      return request({ url: `/api/admin/invoices${params ? `?${$.param(params)}` : ''}` });
+    },
+    adminReviewInvoice(id, status) {
+      return request({ url: `/api/admin/invoices/${encodeURIComponent(id)}/status`, method: 'PUT', data: { status } });
+    },
+
+    // ===== 管理后台 · 全站统计 =====
+    adminUsageStats() {
+      return request({ url: '/api/admin/stats/usage' });
+    },
+
+    // ===== 管理后台 · 模型管理 =====
+    adminModels(params) {
+      return request({ url: `/api/admin/models${params ? `?${$.param(params)}` : ''}` });
+    },
+    adminModelDetail(id) {
+      return request({ url: `/api/admin/models/${encodeURIComponent(id)}` });
+    },
+    adminCreateModel(payload) {
+      return request({ url: '/api/admin/models', method: 'POST', data: payload });
+    },
+    adminUpdateModel(id, payload) {
+      return request({ url: `/api/admin/models/${encodeURIComponent(id)}`, method: 'PUT', data: payload });
+    },
+    adminUpdateModelStatus(id, status) {
+      return request({ url: `/api/admin/models/${encodeURIComponent(id)}/status`, method: 'PUT', data: { status } });
+    },
+    adminDeleteModel(id) {
+      return request({ url: `/api/admin/models/${encodeURIComponent(id)}`, method: 'DELETE' });
     }
   };
 }());
