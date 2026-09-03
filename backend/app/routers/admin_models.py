@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import require_admin
 from ..core.response import ok
-from ..schemas.model import ModelCreateRequest, ModelStatusRequest, ModelUpdateRequest
+from ..schemas.model import FetchModelsRequest, ModelCreateRequest, ModelStatusRequest, ModelUpdateRequest
 from ..services import model_service
 
 router = APIRouter(prefix="/admin", tags=["admin-models"])
@@ -51,6 +51,15 @@ def create_model(
     """创建模型:枚举非法 400;model_code+provider_type 冲突 409「模型已存在」。"""
     model = model_service.create_model(db, admin.id, payload)
     return ok(data=model_service.model_to_admin(model), http_status=201)
+
+
+@router.post("/models/fetch")
+async def fetch_models(
+    payload: FetchModelsRequest,
+    admin=Depends(require_admin),
+):
+    """手动获取供应商可用模型列表:调 OpenAI 兼容 GET {base_url}/v1/models。"""
+    return ok(data=await model_service.fetch_available_models(payload.base_url, payload.api_key))
 
 
 @router.get("/models/{model_id}")
