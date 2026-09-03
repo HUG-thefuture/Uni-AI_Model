@@ -1,0 +1,75 @@
+{
+  "_说明": "阿里云百炼 DashScope 模型配置(免费额度)。vendor=dashscope,文本走 OpenAI 兼容(compatible-mode),图像/语音走原协议。密钥走环境变量 DASHSCOPE_API_KEY,严禁入库。经 scripts/seed_dashscope_models.py 幂等写入 models 表。",
+  "models": [
+    {
+      "name": "Qwen-Plus 对话(百炼)",
+      "model_code": "qwen-plus",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "阿里云百炼 Qwen-Plus 对话模型,免费额度,文本对话主链路",
+      "capability_tags": ["对话", "推理", "百炼"]
+    },
+    {
+      "name": "Qwen-Turbo 对话(百炼)",
+      "model_code": "qwen-turbo",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "阿里云百炼 Qwen-Turbo 快速低成本对话模型",
+      "capability_tags": ["对话", "百炼", "快速"]
+    },
+    {
+      "name": "通义万相文生图(百炼)",
+      "model_code": "wanx2.1-t2i-turbo",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 10,
+      "max_duration_sec": 120,
+      "status": "enabled",
+      "config_json": "{\"image_size\": \"1024*1024\", \"num\": 1}",
+      "description": "阿里云百炼通义万相文生图模型,异步提交轮询出图",
+      "capability_tags": ["图像生成", "百炼"]
+    },
+    {
+      "name": "Qwen-TTS 声音合成(百炼)",
+      "model_code": "qwen-tts",
+      "provider_type": "online",
+      "model_type": "audio",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 2,
+      "max_duration_sec": 300,
+      "status": "enabled",
+      "config_json": "{}",
+      "description": "阿里云百炼语音合成模型,文本转语音",
+      "capability_tags": ["语音合成", "百炼"]
+    },
+    {
+      "name": "Fun-ASR 语音识别(百炼)",
+      "model_code": "fun-asr",
+      "provider_type": "online",
+      "model_type": "audio",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 2,
+      "max_duration_sec": 300,
+      "status": "enabled",
+      "config_json": "{}",
+      "description": "阿里云百炼语音识别模型,音频转文本(需公网音频地址)",
+      "capability_tags": ["语音识别", "百炼"]
+    }
+  ]
+}
