@@ -10,7 +10,7 @@
   const routeTitles = {
     home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
     audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心',
-    billing: '个人账单', invoice: '发票管理'
+    billing: '个人账单', invoice: '发票管理', 'admin-models': '模型管理'
   };
 
   const state = {
@@ -40,7 +40,8 @@
     tasks: [],
     busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false },
     billing: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, tab: 'usage', period: 'all', month: new Date().toISOString().slice(0, 7), type: 'all' },
-    invoice: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, period: 'all', month: new Date().toISOString().slice(0, 7), formOpen: false, formBusy: false }
+    invoice: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, period: 'all', month: new Date().toISOString().slice(0, 7), formOpen: false, formBusy: false },
+    adminModels: { loaded: false, loading: false, error: '', items: [], page: 1, pageSize: 10, total: 0, formOpen: false, editingId: null, formBusy: false, fetchBusy: false, fetchModels: [] }
   };
 
   let user = { name: '用户', initial: 'U', balance: '—', school: '未加载学校', realName: '未认证', role: 'user' };
@@ -49,7 +50,8 @@
     ['text', '文本交互舱', 'layui-icon-dialogue'], ['image', '图像生成室', 'layui-icon-picture'],
     ['audio', '声音创作坊', 'layui-icon-voice'], ['video', '视频合成站', 'layui-icon-video'],
     ['tasks', '创作历史', 'layui-icon-list'], ['profile', '个人中心', 'layui-icon-user'],
-    ['billing', '个人账单', 'layui-icon-rmb'], ['invoice', '发票管理', 'layui-icon-file']
+    ['billing', '个人账单', 'layui-icon-rmb'], ['invoice', '发票管理', 'layui-icon-file'],
+    ['admin-models', '模型管理', 'layui-icon-set']
   ];
   let models = [
     { name: 'qwen3.7-plus', type: '语言模型', group: '国产顶级模型', source: '云端模型', tag: '深度思考', discount: '6折', desc: '适合问答、写作、代码与复杂任务规划的高质量语言模型。', tone: 'linear-gradient(135deg,#386ee5,#7951d4)' },
@@ -450,7 +452,7 @@
     return `<div class="page-head"><div><h1 class="page-title">${title}</h1><p class="page-subtitle">${subtitle}</p></div>${action || ''}</div>`;
   }
   function navTemplate(route) {
-    return navItems.map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}"${route === id ? ' aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('');
+    return navItems.filter(([id]) => id !== 'admin-models' || user.role === 'admin').map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}"${route === id ? ' aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('');
   }
   function shell(route, content) {
     return `
@@ -703,8 +705,114 @@
       ${form}
       <section class="panel panel-pad invoice-records-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-list')}开票记录</h2></div><div class="filters" role="group" aria-label="发票时间范围">${[['all', '全部'], ['year', '年'], ['month', '月'], ['day', '日'], ['custom', '自定义']].map(([value, label]) => `<button type="button" class="filter-btn ${state.invoice.period === value ? 'active' : ''}" data-invoice-period="${value}" aria-pressed="${state.invoice.period === value}">${label}</button>`).join('')}<label class="billing-month"><span class="sr-only">发票月份</span><input class="field" id="invoice-month" type="month" value="${escapeHtml(state.invoice.month)}" aria-label="发票月份" /></label></div></div><div class="table-wrap" role="region" aria-label="开票记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">申请时间</th><th scope="col">发票抬头</th><th scope="col">发票类型</th><th scope="col">发票金额</th><th scope="col">发票状态</th><th scope="col">驳回原因</th><th scope="col">备注/税号</th></tr></thead><tbody>${invoiceRows(pageRecords)}</tbody></table></div><div class="billing-pagination"><span>共 ${records.length} 条</span><div><button type="button" class="btn-quiet" data-invoice-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-invoice-page="1" ${nextDisabled}>下一页</button></div></div></section>`;
   }
+  function adminVendorIsBuiltin(vendor) {
+    return ['siliconflow', 'dashscope', 'ollama', 'mock'].includes(String(vendor || '').trim().toLowerCase());
+  }
+  function adminProviderTypeLabel(value) {
+    return value === 'local' ? '本地' : '云端';
+  }
+  function adminModelTypeLabel(value) {
+    return { text: '文本', image: '图像', audio: '音频', video: '视频' }[value] || '其他';
+  }
+  function adminModelsAccessDeniedView() {
+    return `${pageHead('模型管理', '配置模型供应商与可用模型。')}
+      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-password')}<div>该页面仅管理员可访问，当前账号没有权限。</div></div></section>`;
+  }
+  function adminModelsRows(items) {
+    if (!items.length) return `<tr><td class="table-empty" colspan="8">暂无模型，点击右上角「新增模型」添加。</td></tr>`;
+    return items.map(item => {
+      const price = item.price_per_call == null || item.price_per_call === '' ? '免费' : `${escapeHtml(item.price_per_call)}/次`;
+      const statusStyle = item.status === 'disabled' ? 'failed' : 'success';
+      const statusText = item.status === 'disabled' ? '已停用' : item.status === 'enabled' ? '启用' : escapeHtml(item.status || '未知');
+      return `<tr>
+        <td>${escapeHtml(item.name || '—')}</td>
+        <td>${escapeHtml(item.model_code || '—')}</td>
+        <td>${escapeHtml(item.vendor || '—')}</td>
+        <td>${escapeHtml(adminProviderTypeLabel(item.provider_type))}</td>
+        <td>${escapeHtml(adminModelTypeLabel(item.model_type))}</td>
+        <td>${escapeHtml(price)}</td>
+        <td><span class="status-tag ${statusStyle}">${statusText}</span></td>
+        <td>
+          <button type="button" class="btn-quiet" data-admin-edit="${escapeHtml(item.id)}">编辑</button>
+          <button type="button" class="btn-quiet" data-admin-toggle="${escapeHtml(item.id)}">${item.status === 'disabled' ? '启用' : '停用'}</button>
+          <button type="button" class="btn-quiet" data-admin-delete="${escapeHtml(item.id)}">删除</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+  function adminModelsFormTemplate() {
+    const editing = state.adminModels.editingId != null;
+    const current = editing ? state.adminModels.items.find(item => String(item.id) === String(state.adminModels.editingId)) : null;
+    const name = current ? current.name : '';
+    const modelCode = current ? current.model_code : '';
+    const providerType = current ? current.provider_type : 'online';
+    const modelType = current ? current.model_type : 'text';
+    const vendor = current ? current.vendor : '';
+    const endpoint = current ? current.endpoint : '';
+    const price = current ? current.price_per_call : '';
+    const description = current ? current.description : '';
+    const capabilityTags = Array.isArray(current && current.capability_tags) ? current.capability_tags.join(',') : (current && current.capability_tags ? String(current.capability_tags) : '');
+    const fetchSelect = state.adminModels.fetchModels.length
+      ? `<select class="select-field" id="admin-fetch-select" aria-label="获取到的模型"><option value="">— 选择模型 —</option>${state.adminModels.fetchModels.map(m => `<option value="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}（${escapeHtml(m.id)}）</option>`).join('')}</select>`
+      : '';
+    return `<form id="admin-model-form">
+      <div class="form-grid">
+        <div class="form-block"><label class="field-label" for="admin-name">展示名 <span class="required">*</span></label><input class="field" id="admin-name" maxlength="60" required value="${escapeHtml(name)}" placeholder="例如 Qwen-Plus" /></div>
+        <div class="form-block"><label class="field-label" for="admin-model-code">model_code <span class="required">*</span></label><input class="field" id="admin-model-code" maxlength="120" required value="${escapeHtml(modelCode)}" placeholder="例如 qwen-plus" /></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-block"><label class="field-label" for="admin-provider-type">供应商类型</label><select class="select-field" id="admin-provider-type"><option value="online" ${providerType === 'online' ? 'selected' : ''}>online（云端）</option><option value="local" ${providerType === 'local' ? 'selected' : ''}>local（本地）</option></select></div>
+        <div class="form-block"><label class="field-label" for="admin-model-type">模型类型</label><select class="select-field" id="admin-model-type"><option value="text" ${modelType === 'text' ? 'selected' : ''}>文本（text）</option><option value="image" ${modelType === 'image' ? 'selected' : ''}>图像（image）</option><option value="audio" ${modelType === 'audio' ? 'selected' : ''}>音频（audio）</option><option value="video" ${modelType === 'video' ? 'selected' : ''}>视频（video）</option></select></div>
+      </div>
+      <div class="form-block"><label class="field-label" for="admin-vendor">供应商 vendor <span class="required">*</span></label><input class="field" id="admin-vendor" maxlength="60" required value="${escapeHtml(vendor)}" placeholder="内置 siliconflow / dashscope / ollama / mock，或自定义供应商名" /></div>
+      <div class="form-block"><label class="field-label" for="admin-endpoint">base_url（endpoint）</label><input class="field" id="admin-endpoint" value="${escapeHtml(endpoint)}" placeholder="自定义供应商时建议填写，例如 http://127.0.0.1:11434/v1" /><p class="state-note" id="admin-endpoint-hint">${icon('layui-icon-tips')} 内置供应商可留空走默认地址；自定义供应商建议填写 base_url。</p></div>
+      <div class="form-block"><label class="field-label" for="admin-api-key">api_key(自定义供应商用)</label><input class="field" id="admin-api-key" type="password" autocomplete="off" placeholder="${current && current.api_key ? '已配置（留空表示不修改）' : '自定义供应商填写密钥'}" /></div>
+      <div class="form-grid">
+        <div class="form-block"><label class="field-label" for="admin-price">price_per_call（单价）</label><input class="field" id="admin-price" type="number" min="0" step="0.0001" value="${escapeHtml(price)}" placeholder="留空或 0 表示免费" /></div>
+        <div class="form-block"><label class="field-label" for="admin-max-duration">max_duration_sec(选填,秒)</label><input class="field" id="admin-max-duration" type="number" min="0" step="1" value="${escapeHtml(current && current.max_duration_sec != null ? current.max_duration_sec : '')}" placeholder="可选" /></div>
+      </div>
+      <div class="form-block"><label class="field-label" for="admin-description">描述</label><textarea class="textarea-field" id="admin-description" maxlength="500" placeholder="简要说明该模型用途">${escapeHtml(description)}</textarea></div>
+      <div class="form-block"><label class="field-label" for="admin-capability-tags">能力标签（逗号分隔）</label><input class="field" id="admin-capability-tags" maxlength="300" value="${escapeHtml(capabilityTags)}" placeholder="例如 文本生成,深度思考" /></div>
+      <div class="form-block">
+        <span class="field-label">获取可用模型</span>
+        <p class="state-note">${icon('layui-icon-tips')} 输入 base_url 与 api_key 后点击「获取可用模型」，从供应商 OpenAI 兼容接口拉取模型列表。</p>
+        <div class="admin-fetch-row">
+          <input class="field" id="admin-fetch-endpoint" value="${escapeHtml(endpoint)}" placeholder="base_url，例如 http://127.0.0.1:11434/v1" />
+          <input class="field" id="admin-fetch-api-key" type="password" autocomplete="off" placeholder="api_key（可空）" />
+          <button type="button" class="btn-secondary" id="admin-fetch-models" ${state.adminModels.fetchBusy ? 'disabled' : ''}>${state.adminModels.fetchBusy ? '拉取中…' : '获取可用模型'}</button>
+        </div>
+        ${fetchSelect}
+      </div>
+      <div class="invoice-form-actions">
+        <button class="btn-quiet" id="admin-form-cancel" type="button">取消</button>
+        <button class="btn-primary" id="admin-form-submit" type="submit" ${state.adminModels.formBusy ? 'disabled' : ''}>${state.adminModels.formBusy ? '提交中…' : (editing ? '保存修改' : '新增模型')}</button>
+      </div>
+    </form>`;
+  }
+  function adminModelsView() {
+    const admin = state.adminModels;
+    const items = admin.items || [];
+    const pageCount = Math.max(1, Math.ceil((Number(admin.total) || items.length) / admin.pageSize));
+    const page = Math.min(admin.page, pageCount);
+    if (admin.page !== page) admin.page = page;
+    const previousDisabled = page <= 1 ? 'disabled aria-disabled="true"' : '';
+    const nextDisabled = page >= pageCount ? 'disabled aria-disabled="true"' : '';
+    const action = `<button class="btn-primary" id="admin-model-open" type="button">${icon('layui-icon-add-1')} 新增模型</button>`;
+    const form = admin.formOpen ? `<section class="panel panel-pad invoice-form-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}${admin.editingId != null ? '编辑模型' : '新增模型'}</h2><p class="text-muted">配置供应商、base_url 与密钥，保存后可在模型广场使用。</p></div></div>${adminModelsFormTemplate()}</section>` : '';
+    const body = admin.loading
+      ? `<tr><td class="table-empty" colspan="8">正在加载模型…</td></tr>`
+      : admin.error
+        ? `<tr><td class="table-empty" colspan="8">${escapeHtml(admin.error)} <button class="btn-quiet" id="admin-models-retry" type="button">重试</button></td></tr>`
+        : adminModelsRows(items);
+    return `${pageHead('模型管理', '自定义供应商、base_url、密钥并维护可用模型。', action)}
+      <section class="panel panel-pad">
+        <div class="notice">${icon('layui-icon-tips')}<div>此处管理后台模型配置，仅管理员可见。停用后模型将不再出现在模型广场。</div></div>
+        <div class="table-wrap" style="margin-top:18px" role="region" aria-label="模型管理表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">展示名</th><th scope="col">model_code</th><th scope="col">供应商</th><th scope="col">类型</th><th scope="col">模型类型</th><th scope="col">单价</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${body}</tbody></table></div>
+        <div class="billing-pagination"><span>共 ${admin.total || items.length} 条</span><div><button type="button" class="btn-quiet" data-admin-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-admin-page="1" ${nextDisabled}>下一页</button></div></div>
+      </section>${form}`;
+  }
   function viewFor(route) {
-    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView, billing: billingView, invoice: invoiceView };
+    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView, billing: billingView, invoice: invoiceView, 'admin-models': adminModelsView };
     return (views[route] || homeView)();
   }
   function loadBillingData() {
@@ -757,6 +865,27 @@
       if (state.route === 'invoice') render();
     });
   }
+  function loadAdminModelsData() {
+    const admin = state.adminModels;
+    if (admin.loading || admin.loaded) return;
+    admin.loading = true;
+    admin.error = '';
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) {
+      admin.loaded = true;
+      admin.loading = false;
+      return;
+    }
+    window.PortalApi.request({ url: `/api/admin/models?page=${admin.page}&page_size=${admin.pageSize}` }).then(data => {
+      admin.items = Array.isArray(data && data.items) ? data.items : [];
+      admin.total = Number(data && data.total) || admin.items.length;
+    }).catch(error => {
+      admin.error = error && error.message ? error.message : '模型列表加载失败，请稍后重试。';
+    }).finally(() => {
+      admin.loading = false;
+      admin.loaded = true;
+      if (state.route === 'admin-models') render();
+    });
+  }
   function loadCurrentUser() {
     if (!window.PortalApi || window.PortalApi.config.demoMode) return Promise.resolve();
     const cached = window.PortalApi.currentUserSnapshot();
@@ -777,6 +906,12 @@
     }
     if (state.route === 'billing') loadBillingData();
     if (state.route === 'invoice') loadInvoiceData();
+    if (state.route === 'admin-models' && user.role !== 'admin') {
+      $('#app').html(shell(state.route, adminModelsAccessDeniedView()));
+      bindEvents();
+      return;
+    }
+    if (state.route === 'admin-models') loadAdminModelsData();
     if (state.route === 'text') loadChatHistory();
     $('#app').html(shell(state.route, viewFor(state.route)));
     bindEvents();
@@ -1219,6 +1354,101 @@
         state.busy.profile = false;
         $('#profile-submit').prop('disabled', false).text('保存资料');
         toast(error && error.message ? error.message : '个人资料保存失败，请稍后重试。', 'error');
+      });
+    });
+    // -------- 模型管理(admin-models) --------
+    $('#admin-model-open').on('click', function () {
+      state.adminModels.formOpen = true;
+      state.adminModels.editingId = null;
+      state.adminModels.fetchModels = [];
+      render();
+    });
+    $('#admin-form-cancel').on('click', function () {
+      state.adminModels.formOpen = false;
+      state.adminModels.editingId = null;
+      state.adminModels.fetchModels = [];
+      render();
+    });
+    $(document).off('click.adminModelsEdit').on('click.adminModelsEdit', '[data-admin-edit]', function () {
+      state.adminModels.formOpen = true;
+      state.adminModels.editingId = Number($(this).data('admin-edit'));
+      state.adminModels.fetchModels = [];
+      render();
+    });
+    $(document).off('click.adminModelsDelete').on('click.adminModelsDelete', '[data-admin-delete]', function () {
+      const id = Number($(this).data('admin-delete'));
+      if (!window.confirm('确定删除该模型吗？此操作无法撤销。')) return;
+      window.PortalApi.request({ url: `/api/admin/models/${id}`, method: 'DELETE' })
+        .then(() => { state.adminModels.loaded = false; toast('模型已删除。', 'success'); render(); })
+        .catch(error => toast(error && error.message ? error.message : '删除失败。', 'error'));
+    });
+    $(document).off('click.adminModelsToggle').on('click.adminModelsToggle', '[data-admin-toggle]', function () {
+      const id = Number($(this).data('admin-toggle'));
+      const item = state.adminModels.items.find(m => String(m.id) === String(id));
+      const next = item && item.status === 'disabled' ? 'enabled' : 'disabled';
+      window.PortalApi.request({ url: `/api/admin/models/${id}/status`, method: 'PUT', data: { status: next } })
+        .then(() => { state.adminModels.loaded = false; render(); })
+        .catch(error => toast(error && error.message ? error.message : '状态更新失败。', 'error'));
+    });
+    $(document).off('click.adminModelsPage').on('click.adminModelsPage', '[data-admin-page]', function () {
+      const pageCount = Math.max(1, Math.ceil((Number(state.adminModels.total) || state.adminModels.items.length) / state.adminModels.pageSize));
+      state.adminModels.page = Math.max(1, Math.min(pageCount, state.adminModels.page + Number($(this).data('admin-page'))));
+      state.adminModels.loaded = false;
+      render();
+    });
+    $('#admin-models-retry').on('click', function () { state.adminModels.loaded = false; state.adminModels.error = ''; render(); });
+    $('#admin-fetch-models').on('click', function () {
+      const baseUrl = ($('#admin-fetch-endpoint').val() || '').trim();
+      const apiKey = ($('#admin-fetch-api-key').val() || '').trim();
+      if (!baseUrl) return toast('请先填写 base_url。', 'error');
+      state.adminModels.fetchBusy = true;
+      $('#admin-fetch-models').prop('disabled', true).text('拉取中…');
+      window.PortalApi.request({ url: '/api/admin/models/fetch', method: 'POST', data: { base_url: baseUrl, api_key: apiKey } })
+        .then(data => {
+          state.adminModels.fetchModels = Array.isArray(data && data.models) ? data.models : [];
+          if (!state.adminModels.fetchModels.length) toast('未获取到模型，请检查 base_url 与 api_key。', 'error');
+          else toast(`已获取 ${state.adminModels.fetchModels.length} 个模型。`, 'success');
+          render();
+        }).catch(error => toast(error && error.message ? error.message : '获取模型失败。', 'error'))
+        .finally(() => { state.adminModels.fetchBusy = false; });
+    });
+    $('#admin-fetch-select').on('change', function () {
+      const id = $(this).val();
+      const name = $(this).find('option:selected').data('name') || id;
+      if (id) { $('#admin-model-code').val(id); if (!$('#admin-name').val()) $('#admin-name').val(name); }
+    });
+    $('#admin-model-form').on('submit', function (event) {
+      event.preventDefault();
+      if (state.adminModels.formBusy) return;
+      const name = normalizeText($('#admin-name').val(), '', 60);
+      const modelCode = normalizeText($('#admin-model-code').val(), '', 120);
+      const providerType = String($('#admin-provider-type').val() || 'online');
+      const modelType = String($('#admin-model-type').val() || 'text');
+      const vendor = normalizeText($('#admin-vendor').val(), '', 60);
+      const endpoint = ($('#admin-endpoint').val() || '').trim() || null;
+      const apiKey = ($('#admin-api-key').val() || '').trim() || null;
+      const price = Number($('#admin-price').val() || 0);
+      const maxDuration = Number($('#admin-max-duration').val()) || null;
+      const description = ($('#admin-description').val() || '').trim() || null;
+      const capabilityTags = ($('#admin-capability-tags').val() || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!name || !modelCode || !vendor) return toast('请填写展示名、model_code 和供应商 vendor。', 'error');
+      const body = { name, model_code: modelCode, provider_type: providerType, model_type: modelType, vendor, endpoint, api_key: apiKey, price_per_call: price, max_duration_sec: maxDuration, description, capability_tags: capabilityTags.length ? capabilityTags : null };
+      state.adminModels.formBusy = true;
+      $('#admin-form-submit').prop('disabled', true).text('提交中…');
+      const req = state.adminModels.editingId != null
+        ? window.PortalApi.request({ url: `/api/admin/models/${state.adminModels.editingId}`, method: 'PUT', data: body })
+        : window.PortalApi.request({ url: '/api/admin/models', method: 'POST', data: body });
+      req.then(() => {
+        state.adminModels.formBusy = false;
+        state.adminModels.formOpen = false;
+        state.adminModels.editingId = null;
+        state.adminModels.loaded = false;
+        toast('模型已保存。', 'success');
+        render();
+      }).catch(error => {
+        state.adminModels.formBusy = false;
+        $('#admin-form-submit').prop('disabled', false).text(state.adminModels.editingId != null ? '保存修改' : '新增模型');
+        toast(error && error.message ? error.message : '模型保存失败。', 'error');
       });
     });
   }
