@@ -9,7 +9,8 @@
   let taskMonitor = null;
   const routeTitles = {
     home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
-    audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心'
+    audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心',
+    billing: '个人账单', invoice: '发票管理'
   };
 
   const state = {
@@ -36,7 +37,9 @@
     audioHistory: [],
     videoHistory: [],
     tasks: [],
-    busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false }
+    busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false },
+    billing: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, tab: 'usage', period: 'all', month: new Date().toISOString().slice(0, 7), type: 'all' },
+    invoice: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, period: 'all', month: new Date().toISOString().slice(0, 7), formOpen: false, formBusy: false }
   };
 
   let user = { name: '用户', initial: 'U', balance: '—', school: '未加载学校', realName: '未认证', role: 'user' };
@@ -44,7 +47,8 @@
     ['home', '首页', 'layui-icon-home'], ['models', '模型广场', 'layui-icon-app'],
     ['text', '文本交互舱', 'layui-icon-dialogue'], ['image', '图像生成室', 'layui-icon-picture'],
     ['audio', '声音创作坊', 'layui-icon-voice'], ['video', '视频合成站', 'layui-icon-video'],
-    ['tasks', '创作历史', 'layui-icon-list'], ['profile', '个人中心', 'layui-icon-user']
+    ['tasks', '创作历史', 'layui-icon-list'], ['profile', '个人中心', 'layui-icon-user'],
+    ['billing', '个人账单', 'layui-icon-rmb'], ['invoice', '发票管理', 'layui-icon-file']
   ];
   let models = [
     { name: 'qwen3.7-plus', type: '语言模型', group: '国产顶级模型', source: '云端模型', tag: '深度思考', discount: '6折', desc: '适合问答、写作、代码与复杂任务规划的高质量语言模型。', tone: 'linear-gradient(135deg,#386ee5,#7951d4)' },
@@ -322,6 +326,83 @@
     const style = normalized === 'succeeded' ? 'success' : (labels[normalized] ? normalized : 'pending');
     return `<span class="status-tag ${style}" aria-label="任务状态：${label}">${label}</span>`;
   }
+  function money(value, signed) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return '—';
+    const sign = signed && amount > 0 ? '+' : '';
+    return `${sign}${amount < 0 ? '-' : ''}¥${Math.abs(amount / 100).toFixed(2)}`;
+  }
+  function dateKey(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+  function dateText(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
+  }
+  function periodMatches(value, period, month) {
+    if (period === 'all') return true;
+    const key = dateKey(value);
+    if (!key) return false;
+    if (period === 'year') return key.slice(0, 4) === String(new Date().getFullYear());
+    if (period === 'day') return key === dateKey(new Date());
+    return key.slice(0, 7) === month;
+  }
+  function walletStatusLabel(status) {
+    const labels = {
+      paid: ['success', '已支付'], success: ['success', '已扣费'], pending: ['pending', '处理中'],
+      failed: ['failed', '失败'], refunded: ['pending', '已退款'], cancelled: ['failed', '已取消']
+    };
+    const [style, label] = labels[status] || ['pending', '状态未知'];
+    return `<span class="status-tag ${style}">${label}</span>`;
+  }
+  function invoiceStatusLabel(status) {
+    const labels = { pending: ['pending', '待审核'], issued: ['success', '已开具'], rejected: ['failed', '已驳回'] };
+    const [style, label] = labels[status] || ['pending', '状态未知'];
+    return `<span class="status-tag ${style}">${label}</span>`;
+  }
+  function invoiceTypeLabel(type) { return type === 'enterprise' ? '企业' : '个人'; }
+  function billingFilteredRecords() {
+    return state.billing.records.filter(record => {
+      if (state.billing.tab === 'usage' && record.type !== 'consumption') return false;
+      if (state.billing.tab === 'balance' && record.type !== 'recharge') return false;
+      if (state.billing.type !== 'all' && record.type !== state.billing.type) return false;
+      return periodMatches(record.created_at, state.billing.period, state.billing.month);
+    });
+  }
+  function invoiceFilteredRecords() {
+    return state.invoice.records.filter(record => periodMatches(record.created_at, state.invoice.period, state.invoice.month));
+  }
+  function invoiceAvailableMinor() {
+    const wallet = state.invoice.wallet || {};
+    const recharged = Number(wallet.total_recharged) || 0;
+    const consumed = Number(wallet.total_consumed) || 0;
+    const billed = state.invoice.records.reduce((sum, record) => record.status === 'rejected' ? sum : sum + (Number(record.amount) || 0), 0);
+    return Math.max(recharged - consumed - billed, 0);
+  }
+  function billingRows(records) {
+    if (!records.length) {
+      const body = state.billing.error
+        ? `${escapeHtml(state.billing.error)} <button class="btn-quiet" id="billing-retry" type="button">重试</button>`
+        : (state.billing.loading ? '正在加载账单…' : '暂无符合条件的账单记录。');
+      return `<tr><td class="table-empty" colspan="7">${body}</td></tr>`;
+    }
+    return records.map(record => {
+      const isConsumption = record.type === 'consumption';
+      const detail = record.order_no || (isConsumption ? '模型调用' : '充值订单');
+      return `<tr><td>${escapeHtml(dateText(record.created_at))}</td><td>${escapeHtml(detail)}</td><td>${isConsumption ? '模型调用' : '余额充值'}</td><td>—</td><td>—</td><td class="${Number(record.amount) < 0 ? 'amount-negative' : 'amount-positive'}">${escapeHtml(money(record.amount, true))}</td><td>${walletStatusLabel(record.status)}</td></tr>`;
+    }).join('');
+  }
+  function invoiceRows(records) {
+    if (!records.length) {
+      const body = state.invoice.error
+        ? `${escapeHtml(state.invoice.error)} <button class="btn-quiet" id="invoice-retry" type="button">重试</button>`
+        : (state.invoice.loading ? '正在加载发票记录…' : '暂无开票记录');
+      return `<tr><td class="table-empty" colspan="7">${body}</td></tr>`;
+    }
+    return records.map(record => `<tr><td>${escapeHtml(dateText(record.created_at))}</td><td>${escapeHtml(record.title || '—')}</td><td>${invoiceTypeLabel(record.type)}</td><td>${escapeHtml(money(record.amount))}</td><td>${invoiceStatusLabel(record.status)}</td><td>${record.status === 'rejected' ? '—' : '—'}</td><td>${escapeHtml(record.tax_no || '—')}</td></tr>`).join('');
+  }
   function pageHead(title, subtitle, action) {
     return `<div class="page-head"><div><h1 class="page-title">${title}</h1><p class="page-subtitle">${subtitle}</p></div>${action || ''}</div>`;
   }
@@ -505,13 +586,118 @@
             </form>
           </div>
         </article>
-        <section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="${escapeHtml(user.realName)}" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="${escapeHtml(roleLabel)}" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包余额与充值结果来自后端接口，账单和发票功能将在对应模块接入后开放。</div></div></section>
+        <section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-user')}基础资料</h2><form id="profile-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="profile-name">昵称</label><input class="field" id="profile-name" autocomplete="nickname" maxlength="30" value="${escapeHtml(user.name)}" /></div><div class="form-block"><label class="field-label" for="profile-school">学校</label><input class="field" id="profile-school" autocomplete="organization" maxlength="50" value="${escapeHtml(user.school)}" /></div><div class="form-block"><label class="field-label" for="profile-verification">实名认证状态</label><input class="field" id="profile-verification" value="${escapeHtml(user.realName)}" disabled /></div><div class="form-block"><label class="field-label" for="profile-role">账号角色</label><input class="field" id="profile-role" value="${escapeHtml(roleLabel)}" disabled /></div></div><button class="btn-primary" id="profile-submit" type="submit" ${state.busy.profile ? 'disabled' : ''}>${state.busy.profile ? '正在保存…' : '保存资料'}</button></form><div class="notice" style="margin-top:20px">${icon('layui-icon-tips')}<div>钱包余额、账单和发票记录均来自后端接口。金额按“分”保存，页面只负责格式化显示。</div></div></section>
       </section>`;
   }
 
+  function billingView() {
+    const records = billingFilteredRecords();
+    const pageCount = Math.max(1, Math.ceil(records.length / state.billing.pageSize));
+    const page = Math.min(state.billing.page, pageCount);
+    if (state.billing.page !== page) state.billing.page = page;
+    const start = (page - 1) * state.billing.pageSize;
+    const pageRecords = records.slice(start, start + state.billing.pageSize);
+    const wallet = state.billing.wallet || {};
+    const month = escapeHtml(state.billing.month);
+    const previousDisabled = page <= 1 ? 'disabled aria-disabled="true"' : '';
+    const nextDisabled = page >= pageCount ? 'disabled aria-disabled="true"' : '';
+    const action = `<button class="btn-primary" type="button" data-route="profile">${icon('layui-icon-rmb')} 立即充值</button>`;
+    return `${pageHead('个人账单', '查看余额和使用记录。', action)}
+      <section class="billing-summary">
+        <article class="panel billing-card"><div class="billing-card-head"><span>当前余额</span><span class="status-tag success">可用</span></div><strong class="billing-amount">${escapeHtml(money(wallet.balance))}</strong><span class="billing-unit">人民币</span></article>
+        <article class="panel billing-card"><div class="billing-card-head"><span>累计消费</span><span class="text-muted">钱包统计</span></div><strong class="billing-amount">${escapeHtml(money(wallet.total_consumed))}</strong><span class="billing-unit">人民币</span></article>
+      </section>
+      <section class="panel panel-pad">
+        <div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-list')}账单明细</h2><p class="text-muted">钱包流水按金额分单位展示，模型原始用量由服务端记录后显示。</p></div></div>
+        <div class="billing-toolbar">
+          <div class="tab-row" role="tablist" aria-label="账单记录类型"><button type="button" class="tab-btn ${state.billing.tab === 'usage' ? 'active' : ''}" data-billing-tab="usage" aria-selected="${state.billing.tab === 'usage'}">使用记录</button><button type="button" class="tab-btn ${state.billing.tab === 'balance' ? 'active' : ''}" data-billing-tab="balance" aria-selected="${state.billing.tab === 'balance'}">余额变更记录</button></div>
+          <div class="filters" role="group" aria-label="账单时间范围">${[['all', '全部'], ['year', '年'], ['month', '月'], ['day', '日'], ['custom', '自定义']].map(([value, label]) => `<button type="button" class="filter-btn ${state.billing.period === value ? 'active' : ''}" data-billing-period="${value}" aria-pressed="${state.billing.period === value}">${label}</button>`).join('')}</div>
+          <label class="billing-month"><span class="sr-only">账单月份</span><input class="field" id="billing-month" type="month" value="${month}" aria-label="账单月份" /></label>
+          <select class="select-field billing-type" id="billing-type" aria-label="账单分类"><option value="all" ${state.billing.type === 'all' ? 'selected' : ''}>所有分类</option><option value="consumption" ${state.billing.type === 'consumption' ? 'selected' : ''}>模型调用</option><option value="recharge" ${state.billing.type === 'recharge' ? 'selected' : ''}>余额充值</option></select>
+        </div>
+        <div class="notice billing-notice">${icon('layui-icon-tips')}<div>当前接口提供充值和消费流水；模型名称、原始用量与单位暂未返回，因此用“—”标记，不生成虚假统计。</div></div>
+        <div class="table-wrap billing-table-wrap" role="region" aria-label="个人账单表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">时间</th><th scope="col">模型/订单</th><th scope="col">分类</th><th scope="col">原始用量</th><th scope="col">用量单位</th><th scope="col">账单金额</th><th scope="col">状态</th></tr></thead><tbody>${billingRows(pageRecords)}</tbody></table></div>
+        <div class="billing-pagination"><span>共 ${records.length} 条</span><div><button type="button" class="btn-quiet" data-billing-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-billing-page="1" ${nextDisabled}>下一页</button></div></div>
+      </section>`;
+  }
+
+  function invoiceView() {
+    const records = invoiceFilteredRecords();
+    const pageCount = Math.max(1, Math.ceil(records.length / state.invoice.pageSize));
+    const page = Math.min(state.invoice.page, pageCount);
+    if (state.invoice.page !== page) state.invoice.page = page;
+    const pageRecords = records.slice((page - 1) * state.invoice.pageSize, page * state.invoice.pageSize);
+    const wallet = state.invoice.wallet || {};
+    const available = invoiceAvailableMinor();
+    const billed = state.invoice.records.reduce((sum, record) => record.status === 'rejected' ? sum : sum + (Number(record.amount) || 0), 0);
+    const latest = state.invoice.records[0];
+    const maxAmount = Math.max(available / 100, 0.01).toFixed(2);
+    const form = state.invoice.formOpen ? `<section class="panel panel-pad invoice-form-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}提交开票申请</h2><p class="text-muted">申请金额按人民币元填写，服务端按分保存。</p></div><button class="btn-quiet" id="invoice-cancel" type="button">取消</button></div><form id="invoice-form"><div class="form-grid"><div class="form-block"><label class="field-label" for="invoice-amount">发票金额（元）<span class="required">*</span></label><input class="field" id="invoice-amount" type="number" min="0.01" max="${maxAmount}" step="0.01" inputmode="decimal" required placeholder="例如 10.00" /></div><div class="form-block"><label class="field-label" for="invoice-type">发票类型<span class="required">*</span></label><select class="select-field" id="invoice-type"><option value="personal">个人</option><option value="enterprise">企业</option></select></div></div><div class="form-block"><label class="field-label" for="invoice-title">发票抬头<span class="required">*</span></label><input class="field" id="invoice-title" maxlength="100" required placeholder="请输入发票抬头" /></div><div class="form-block"><label class="field-label" for="invoice-tax-no">企业税号</label><input class="field" id="invoice-tax-no" maxlength="50" placeholder="企业发票填写，个人发票可留空" /></div><p class="state-note">${icon('layui-icon-tips')} 当前可开票金额：${escapeHtml(money(available))}；申请后需等待管理员审核。</p><div class="invoice-form-actions"><button class="btn-quiet" id="invoice-cancel-bottom" type="button">取消</button><button class="btn-primary" id="invoice-submit" type="submit" ${state.invoice.formBusy ? 'disabled' : ''}>${state.invoice.formBusy ? '正在提交…' : '提交申请'}</button></div></form></section>` : '';
+    const info = latest ? `<div class="invoice-info-card"><div><span>默认抬头</span><strong>${escapeHtml(latest.title || '—')}</strong></div><div><span>发票类型</span><strong>${invoiceTypeLabel(latest.type)}</strong></div><div><span>税号</span><strong>${escapeHtml(latest.tax_no || '—')}</strong></div></div>` : `<div class="empty-state invoice-empty">${icon('layui-icon-file')}<div>暂无发票信息<br><small>提交一次开票申请后会保留最近使用的抬头。</small></div></div>`;
+    const previousDisabled = page <= 1 ? 'disabled aria-disabled="true"' : '';
+    const nextDisabled = page >= pageCount ? 'disabled aria-disabled="true"' : '';
+    const action = `<button class="btn-primary" id="invoice-open" type="button">${icon('layui-icon-add-1')} 去开票</button>`;
+    return `${pageHead('发票管理', '管理开票信息与记录。', action)}
+      <section class="invoice-grid">
+        <article class="panel invoice-amount-card"><div class="billing-card-head"><span>可开票金额</span><span class="status-tag ${available > 0 ? 'success' : 'pending'}">${available > 0 ? '可申请' : '暂无额度'}</span></div><strong class="billing-amount">${escapeHtml(money(available))}</strong><span class="billing-unit">人民币</span><p class="invoice-formula">计算口径：累计充值 ${escapeHtml(money(wallet.total_recharged))} - 累计消费 ${escapeHtml(money(wallet.total_consumed))} - 已申请开票 ${escapeHtml(money(billed))}</p></article>
+        <section class="panel panel-pad invoice-info-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-form')}发票信息</h2><p class="text-muted">保存最近一次申请使用的抬头与税号。</p></div><button class="btn-secondary" data-invoice-open type="button">${latest ? '编辑信息' : '去添加'}</button></div>${info}</section>
+      </section>
+      ${form}
+      <section class="panel panel-pad invoice-records-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-list')}开票记录</h2></div><div class="filters" role="group" aria-label="发票时间范围">${[['all', '全部'], ['year', '年'], ['month', '月'], ['day', '日'], ['custom', '自定义']].map(([value, label]) => `<button type="button" class="filter-btn ${state.invoice.period === value ? 'active' : ''}" data-invoice-period="${value}" aria-pressed="${state.invoice.period === value}">${label}</button>`).join('')}<label class="billing-month"><span class="sr-only">发票月份</span><input class="field" id="invoice-month" type="month" value="${escapeHtml(state.invoice.month)}" aria-label="发票月份" /></label></div></div><div class="table-wrap" role="region" aria-label="开票记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">申请时间</th><th scope="col">发票抬头</th><th scope="col">发票类型</th><th scope="col">发票金额</th><th scope="col">发票状态</th><th scope="col">驳回原因</th><th scope="col">备注/税号</th></tr></thead><tbody>${invoiceRows(pageRecords)}</tbody></table></div><div class="billing-pagination"><span>共 ${records.length} 条</span><div><button type="button" class="btn-quiet" data-invoice-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-invoice-page="1" ${nextDisabled}>下一页</button></div></div></section>`;
+  }
   function viewFor(route) {
-    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView };
+    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView, billing: billingView, invoice: invoiceView };
     return (views[route] || homeView)();
+  }
+  function loadBillingData() {
+    const billing = state.billing;
+    if (billing.loading || billing.loaded) return;
+    billing.loading = true;
+    billing.error = '';
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) {
+      billing.loaded = true;
+      billing.loading = false;
+      return;
+    }
+    Promise.all([
+      window.PortalApi.wallet(),
+      window.PortalApi.walletRecords({ page: 1, page_size: 100 })
+    ]).then(([wallet, records]) => {
+      billing.wallet = wallet || {};
+      billing.records = Array.isArray(records && records.list) ? records.list : [];
+      billing.page = 1;
+    }).catch(error => {
+      billing.error = error && error.message ? error.message : '账单加载失败，请稍后重试。';
+    }).finally(() => {
+      billing.loading = false;
+      billing.loaded = true;
+      if (state.route === 'billing') render();
+    });
+  }
+  function loadInvoiceData() {
+    const invoice = state.invoice;
+    if (invoice.loading || invoice.loaded) return;
+    invoice.loading = true;
+    invoice.error = '';
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) {
+      invoice.loaded = true;
+      invoice.loading = false;
+      return;
+    }
+    Promise.all([
+      window.PortalApi.wallet(),
+      window.PortalApi.invoices({ page: 1, page_size: 100 })
+    ]).then(([wallet, invoices]) => {
+      invoice.wallet = wallet || {};
+      invoice.records = Array.isArray(invoices && invoices.list) ? invoices.list : [];
+      invoice.page = 1;
+    }).catch(error => {
+      invoice.error = error && error.message ? error.message : '发票记录加载失败，请稍后重试。';
+    }).finally(() => {
+      invoice.loading = false;
+      invoice.loaded = true;
+      if (state.route === 'invoice') render();
+    });
   }
   function loadCurrentUser() {
     if (!window.PortalApi || window.PortalApi.config.demoMode) return Promise.resolve();
@@ -531,6 +717,8 @@
       $('#app').html(authRequiredView());
       return;
     }
+    if (state.route === 'billing') loadBillingData();
+    if (state.route === 'invoice') loadInvoiceData();
     $('#app').html(shell(state.route, viewFor(state.route)));
     bindEvents();
     if (state.route === 'text') $('#message-list').scrollTop($('#message-list')[0].scrollHeight);
@@ -705,6 +893,96 @@
     $('#audio-form').on('submit', function (event) { event.preventDefault(); const text = $('#audio-text').val().trim(); if (!text) return toast('请先输入需要合成的文本。', 'error'); if (state.busy.audio) return; state.busy.audio = true; const record = createRecord('audio', { title: text.slice(0, 20) + (text.length > 20 ? '…' : ''), mode: state.audioMode, meta: `${text.length} 字符`, shouldFail: shouldSimulateFailure(text) }); if (!record) { state.busy.audio = false; return; } state.busy.audio = false; toast('声音任务已提交，请在历史中查看进度。', 'success'); render(); });
     $('[data-video-duration]').on('click', function () { state.videoDuration = $(this).data('video-duration'); render(); });
     $('#video-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#video-prompt').val().trim(); if (!prompt) return toast('请先描述要生成的视频内容。', 'error'); if (state.busy.video) return; state.busy.video = true; const record = createRecord('video', { title: prompt.slice(0, 20) + (prompt.length > 20 ? '…' : ''), mode: '文生视频', meta: state.videoDuration, shouldFail: shouldSimulateFailure(prompt) }); if (!record) { state.busy.video = false; return; } state.busy.video = false; toast('视频任务已提交，渲染可能需要几分钟。', 'success'); render(); });
+    $('[data-billing-tab]').on('click', function () {
+      state.billing.tab = $(this).data('billing-tab');
+      state.billing.page = 1;
+      render();
+    });
+    $('[data-billing-period]').on('click', function () {
+      state.billing.period = $(this).data('billing-period');
+      state.billing.page = 1;
+      render();
+    });
+    $('#billing-month').on('change', function () {
+      state.billing.month = String($(this).val() || '').slice(0, 7) || new Date().toISOString().slice(0, 7);
+      state.billing.period = 'custom';
+      state.billing.page = 1;
+      render();
+    });
+    $('#billing-type').on('change', function () {
+      state.billing.type = String($(this).val() || 'all');
+      state.billing.page = 1;
+      render();
+    });
+    $('[data-billing-page]').on('click', function () {
+      const pageCount = Math.max(1, Math.ceil(billingFilteredRecords().length / state.billing.pageSize));
+      state.billing.page = Math.max(1, Math.min(pageCount, state.billing.page + Number($(this).data('billing-page'))));
+      render();
+    });
+    $('#billing-retry').on('click', function () {
+      state.billing.loaded = false;
+      state.billing.error = '';
+      render();
+    });
+    $('[data-invoice-open]').add('#invoice-open').on('click', function () {
+      if (window.PortalConfig.demoMode) return toast('演示模式未连接发票接口。', 'error');
+      state.invoice.formOpen = true;
+      render();
+      window.setTimeout(() => $('#invoice-amount').trigger('focus'), 0);
+    });
+    $('#invoice-cancel, #invoice-cancel-bottom').on('click', function () {
+      state.invoice.formOpen = false;
+      state.invoice.formBusy = false;
+      render();
+    });
+    $('[data-invoice-period]').on('click', function () {
+      state.invoice.period = $(this).data('invoice-period');
+      state.invoice.page = 1;
+      render();
+    });
+    $('#invoice-month').on('change', function () {
+      state.invoice.month = String($(this).val() || '').slice(0, 7) || new Date().toISOString().slice(0, 7);
+      state.invoice.period = 'custom';
+      state.invoice.page = 1;
+      render();
+    });
+    $('[data-invoice-page]').on('click', function () {
+      const pageCount = Math.max(1, Math.ceil(invoiceFilteredRecords().length / state.invoice.pageSize));
+      state.invoice.page = Math.max(1, Math.min(pageCount, state.invoice.page + Number($(this).data('invoice-page'))));
+      render();
+    });
+    $('#invoice-retry').on('click', function () {
+      state.invoice.loaded = false;
+      state.invoice.error = '';
+      render();
+    });
+    $('#invoice-form').on('submit', function (event) {
+      event.preventDefault();
+      if (window.PortalConfig.demoMode || state.invoice.formBusy) return;
+      const amount = Number($('#invoice-amount').val());
+      const type = String($('#invoice-type').val() || 'personal');
+      const title = normalizeText($('#invoice-title').val(), '', 100);
+      const taxNo = normalizeText($('#invoice-tax-no').val(), '', 50);
+      if (!Number.isFinite(amount) || amount <= 0) return toast('请输入大于 0 的发票金额。', 'error');
+      if (!title) return toast('请填写发票抬头。', 'error');
+      if (type === 'enterprise' && !taxNo) return toast('企业发票需要填写税号。', 'error');
+      const cents = Math.round(amount * 100);
+      const available = invoiceAvailableMinor();
+      if (cents <= 0 || cents > available) return toast(`申请金额不能超过可开票金额 ${money(available)}。`, 'error');
+      state.invoice.formBusy = true;
+      $('#invoice-submit').prop('disabled', true).text('正在提交…');
+      window.PortalApi.createInvoice({ amount: cents, title, type, tax_no: taxNo || null }).then(() => {
+        state.invoice.formBusy = false;
+        state.invoice.formOpen = false;
+        state.invoice.loaded = false;
+        toast('开票申请已提交，请等待管理员审核。', 'success');
+        render();
+      }).catch(error => {
+        state.invoice.formBusy = false;
+        $('#invoice-submit').prop('disabled', false).text('提交申请');
+        toast(error && error.message ? error.message : '开票申请提交失败，请稍后重试。', 'error');
+      });
+    });
     if (!window.PortalConfig.demoMode) {
       $('#image-submit, #audio-submit, #video-submit').prop('disabled', false).removeAttr('aria-disabled').each(function () {
         $(this).html(`${icon('layui-icon-release')} ${this.id === 'video-submit' ? '文生视频' : this.id === 'audio-submit' ? '生成音频' : '立即生成'}`);

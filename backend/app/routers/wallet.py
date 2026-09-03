@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -37,9 +38,17 @@ async def recharge(recharge_data: RechargeRequest, db: AsyncSession = Depends(ge
 async def get_records(db: AsyncSession = Depends(get_async_db), current_user=Depends(get_current_user), page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页条数")):
     stmt=await wallet.get_user_records(db,current_user.id,page,page_size)
-    return stmt
+    return ok(jsonable_encoder(stmt))
 
-@router.post("/invoices", response_model=InvoiceResponse)
+@router.get("/invoices")
+async def get_invoices(
+        db: AsyncSession = Depends(get_async_db),
+        current_user=Depends(get_current_user),
+        page: int = Query(1, ge=1, description="页码"),
+        page_size: int = Query(10, ge=1, le=100, description="每页条数")
+):
+    return ok(jsonable_encoder(await wallet.get_user_invoices(db, current_user.id, page, page_size)))
+@router.post("/invoices")
 async def create_invoice(
         data: InvoiceCreate,
         db: AsyncSession = Depends(get_async_db),
@@ -50,4 +59,5 @@ async def create_invoice(
     if wallets.total_recharged - wallets.total_consumed < data.amount:
         raise APIError(400, "可开票余额不足")
 
-    return await admin_wallet.create_invoice(db, current_user.id, data)
+    invoice = await admin_wallet.create_invoice(db, current_user.id, data)
+    return ok(InvoiceResponse.model_validate(invoice).model_dump(mode="json"))

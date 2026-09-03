@@ -144,8 +144,17 @@
     wallet() {
       return request({ url: '/api/wallet/me' });
     },
+    walletRecords(params) {
+      return request({ url: `/api/wallet/records${params ? `?${$.param(params)}` : ''}` });
+    },
     recharge(payload) {
       return request({ url: '/api/wallet/recharge', method: 'POST', data: payload });
+    },
+    invoices(params) {
+      return request({ url: `/api/wallet/invoices${params ? `?${$.param(params)}` : ''}` });
+    },
+    createInvoice(payload) {
+      return request({ url: '/api/wallet/invoices', method: 'POST', data: payload });
     },
     updateProfile(payload) {
       return request({ url: '/api/user/profile', method: 'PUT', data: payload });
