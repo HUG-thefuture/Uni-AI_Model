@@ -199,6 +199,10 @@ async def run_async_task(task_id: int) -> None:
     except Exception as exc:  # noqa: BLE001 兜底:任何异常不得逃逸
         logger.exception("任务 %s 执行异常", task_id)
         error_code = "internal_error"
+        # 结算 flush/commit 失败会让 Session 进入 PendingRollback 状态；
+        # 仅在该数据库异常路径回滚，避免影响 ProviderError 的正常退款/重试流程。
+        db.rollback()
+        task = db.get(AiTask, task_id)
         _fail_task(db, task, "任务执行失败,本次不扣费", start)
     finally:
         try:

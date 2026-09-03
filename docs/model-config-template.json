@@ -114,6 +114,20 @@
       "capability_tags": ["视频生成", "文生视频"]
     },
     {
+      "name": "Wan 2.2 图生视频(线上)",
+      "model_code": "Wan-AI/Wan2.2-I2V-A14B",
+      "provider_type": "online",
+      "model_type": "video",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 30,
+      "max_duration_sec": 15,
+      "status": "enabled",
+      "config_json": "{\"resolution\": \"1280x720\"}",
+      "description": "SiliconFlow 官方 Wan 2.2 图生视频模型，需上传 PNG 或 JPG 首帧。",
+      "capability_tags": ["视频生成", "图生视频"]
+    },
+    {
       "name": "Qwen2.5 3B(本地 Ollama)",
       "model_code": "qwen2.5:3b",
       "provider_type": "local",

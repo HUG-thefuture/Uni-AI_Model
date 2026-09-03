@@ -51,7 +51,7 @@ def _create_text_task(db: Session, body: TextTaskCreate, user: User):
     return model, session, task
 
 
-def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask:
+def _submit_image_task(db: Session, body: ImageTaskCreate, user: User, request_id: str) -> AiTask:
     """图像任务提交:模型校验 → 同 request_id 去重 409 → 冻结 → 建 pending 任务。"""
     model = db.get(Model, body.model_id)
     if model is None:
@@ -62,7 +62,7 @@ def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask
         raise APIError(409, "该模型不支持图像生成")
     dup = (
         db.query(AiTask)
-        .filter(AiTask.request_id == current_request_id(), AiTask.user_id == user.id)
+        .filter(AiTask.request_id == request_id, AiTask.user_id == user.id)
         .first()
     )
     if dup is not None:
@@ -70,7 +70,7 @@ def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask
     params = body.params.model_dump(exclude_none=True) if body.params else {}
     billing.freeze(db, user.id, model.price_per_call)
     task = AiTask(
-        request_id=current_request_id(), user_id=user.id, model_id=model.id,
+        request_id=request_id, user_id=user.id, model_id=model.id,
         task_type="image", prompt=body.prompt, params_json=json.dumps(params, ensure_ascii=False),
         status="pending", cost_status="frozen", cost=model.price_per_call,
     )
@@ -133,7 +133,7 @@ async def create_image_task(body: ImageTaskCreate,
                             db: Session = Depends(get_db)):
     """提交图像任务:创建 pending 任务并冻结积分,后台 asyncio.create_task 执行,
     立即返回 {task_id, status:"pending"};同 request_id 重复提交 409。"""
-    task = await run_db(_submit_image_task, db, body, user)
+    task = await run_db(_submit_image_task, db, body, user, current_request_id())
     task_service.start_background_task(task.id)
     return ok({"task_id": task.id, "status": task.status})
 
@@ -178,9 +178,11 @@ async def create_video_task(body: VideoTaskCreate,
                             user: User = Depends(get_current_user),
                             db: Session = Depends(get_db)):
     """长文本转视频:文本 ≤2000 字(超长 400)→ 冻结 → pending 任务,
-    后台提交上游并轮询(上游未定,线上模型超时判 failed 不扣费,Mock 可演示全链路)。"""
+    后台提交 SiliconFlow 并轮询；图生视频必须选择 I2V 模型。"""
     model = await run_db(av_service.get_video_model, db, body.model_id)
     params = body.params.model_dump(exclude_none=True) if body.params else {}
+    if params.get("image_url") and "I2V" not in model.model_code.upper():
+        raise APIError(409, "上传首帧后请在模型广场选择图生视频模型")
     task = await run_db(av_service.submit_av_task, db, user, model, "video", body.text, params)
     task_service.start_background_task(task.id)
     return ok({"task_id": task.id, "status": task.status})

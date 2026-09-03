@@ -102,12 +102,12 @@ class BaseProvider(abc.ABC):
             try:
                 async with httpx.AsyncClient(timeout=self._timeout(model_type)) as client:
                     resp = await client.post(url, headers=headers, json=json_body)
-                if validate:
-                    validate(resp)  # 抛 ProviderError(不可重试类)或直接通过
                 if resp.status_code in _RETRYABLE_STATUS:
                     raise httpx.HTTPStatusError(
                         f"上游 {resp.status_code}", request=resp.request, response=resp
                     )
+                if validate:
+                    validate(resp)  # 业务错误不重试；可重试状态已在上面处理
                 return resp
             except ProviderError:
                 raise  # 业务类错误(鉴权/参数)不重试

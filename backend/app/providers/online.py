@@ -37,6 +37,8 @@ class OnlineProvider(BaseProvider):
             "stream": True,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
         client, resp = await self._open_stream_with_retry(
             f"{BASE_URL}/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -81,6 +83,8 @@ class OnlineProvider(BaseProvider):
             "stream": False,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
+        if params:
+            body.update({k: v for k, v in params.items() if v is not None})
 
         def validate(resp: httpx.Response) -> None:
             if resp.status_code >= 400:
@@ -142,6 +146,10 @@ class OnlineProvider(BaseProvider):
             "image_size": image_size,
             "batch_size": batch_size,
         }
+        if params.get("negative_prompt"):
+            body["negative_prompt"] = str(params["negative_prompt"])
+        if params.get("image") or params.get("image_url"):
+            body["image"] = params.get("image") or params.get("image_url")
 
         def validate(resp: httpx.Response) -> None:
             if resp.status_code >= 400:
@@ -158,9 +166,15 @@ class OnlineProvider(BaseProvider):
         upload_dir = Path(get_settings().upload_dir)
         upload_dir.mkdir(parents=True, exist_ok=True)
         urls: list[str] = []
-        for item in data.get("images") or []:
-            if item.get("url"):
-                urls.append(str(item["url"]))
+        # SiliconFlow 当前返回 images；兼容 OpenAI 风格 data，避免上游版本差异导致结果丢失。
+        image_items = data.get("images") or data.get("data") or []
+        if isinstance(image_items, dict):
+            image_items = [image_items]
+        for item in image_items:
+            if not isinstance(item, dict):
+                continue
+            if item.get("url") or item.get("image_url"):
+                urls.append(str(item.get("url") or item.get("image_url")))
             elif item.get("b64_json"):
                 filename = f"img_{_uuid.uuid4().hex}.png"
                 try:
@@ -305,9 +319,8 @@ class OnlineProvider(BaseProvider):
 
     async def generate_video(self, model, prompt: str, params: dict | None = None) -> dict:
         """长文本转视频:POST /v1/video/submit 提交任务句柄,状态轮询由 task_service 负责。
-
-        TODO:上游视频接口路径/报文本期未定,若 404/未实现则抛 provider_not_ready,
-        线上模型视频任务将 failed 不扣费,由 Mock 模型兜底演示全链路。
+        上游完成后通过 /v1/video/status 查询并返回可播放视频地址；鉴权、参数和网络错误
+        均保留统一 ProviderError，由任务执行器负责失败退费。
         """
         key = self.require_config(get_settings().siliconflow_api_key, "SILICONFLOW_API_KEY")
         params = params or {}
@@ -316,8 +329,14 @@ class OnlineProvider(BaseProvider):
             "prompt": prompt,
             "image_size": params.get("image_size") or params.get("resolution") or "1280x720",
         }
+        if params.get("negative_prompt"):
+            body["negative_prompt"] = str(params["negative_prompt"])
+        if params.get("seed") is not None:
+            body["seed"] = params["seed"]
         if params.get("image") or params.get("image_url"):
-            body["image"] = params.get("image") or params.get("image_url")
+            body["image"] = await self._video_image_input(
+                params.get("image") or params.get("image_url")
+            )
         try:
             resp = await self._post_with_retry(
                 f"{BASE_URL}/v1/video/submit",
@@ -331,10 +350,12 @@ class OnlineProvider(BaseProvider):
                 ),
             )
             data = resp.json()
-        except (httpx.HTTPError, ProviderError) as exc:
-            # 上游未实现/404/网络不可达:统一按「接口未就绪」处理,任务失败不扣费
+        except ProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            # 网络不可达时保留明确的上游不可用错误，鉴权/参数错误由 ProviderError 原样返回
             raise ProviderError(
-                "provider_not_ready", "上游视频接口暂不可用,请使用 Mock 模型演示", str(exc)
+                "provider_unreachable", "无法连接模型服务,请检查网络或服务状态", str(exc)
             ) from exc
         upstream_id = data.get("requestId") or data.get("task_id") or data.get("id") or data.get("request_id")
         if not upstream_id:
@@ -342,6 +363,31 @@ class OnlineProvider(BaseProvider):
                 "provider_bad_response", "视频服务未返回任务句柄", resp.text[:500]
             )
         return {"task_id": str(upstream_id), "status": "processing", "raw": data}
+
+    async def _video_image_input(self, value: str) -> str:
+        """将门户本地上传的首帧转为 data URI，公网 URL 原样交给 SiliconFlow。
+
+        浏览器上传接口返回 /static/ 路径，云端模型无法访问本机地址；将其编码后可直接
+        用于 Wan I2V。只允许上传目录中的 png/jpg 文件，避免路径穿越。
+        """
+        import base64
+        from pathlib import Path
+
+        if not value.startswith("/static/"):
+            return value
+        filename = Path(value).name
+        suffix = Path(filename).suffix.lower()
+        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(suffix)
+        if not mime:
+            raise ProviderError("invalid_image", "首帧仅支持 PNG 或 JPG 图片")
+        path = Path(get_settings().upload_dir) / filename
+        if not path.is_file():
+            raise ProviderError("invalid_image", "首帧图片不存在，请重新上传")
+        try:
+            raw = await asyncio.to_thread(path.read_bytes)
+        except OSError as exc:
+            raise ProviderError("invalid_image", "首帧图片读取失败，请重新上传", str(exc)) from exc
+        return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
     async def query_video(self, model, handle: dict) -> dict:
         """查询 SiliconFlow 视频任务状态，统一为执行器使用的 completed/processing 语义。"""
