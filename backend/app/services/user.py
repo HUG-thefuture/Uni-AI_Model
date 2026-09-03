@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import APIError
 from app.models import User, UserProfile
 from app.schemas.auth import profile_update_req
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 
 async def get_profile(db: AsyncSession, user_id: int):

@@ -232,7 +232,15 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
         else:
             error_code = error_code or "internal_error"
         await run_db(_mark_text_failed, db, task_id, user_id, exc, start)
-        message = "生成超时,本次不扣费" if _timeout_exc(exc) else "生成失败,本次不扣费"
+        # ProviderError.message_zh 本就是「可直接返回前端的中文提示」,原样透出便于定位;
+        # 非 ProviderError(无 message_zh)仍用通用文案,避免向前端泄漏内部堆栈细节。
+        detail = getattr(exc, "message_zh", None)
+        if _timeout_exc(exc):
+            message = "生成超时,本次不扣费"
+        elif detail:
+            message = f"{detail}（本次不扣费）"
+        else:
+            message = "生成失败,本次不扣费"
         yield sse_frame({"error": {"code": str(error_code), "message": message}})
     finally:
         _write_call_log(db, request_id=request_id, user_id=user_id, model=model,

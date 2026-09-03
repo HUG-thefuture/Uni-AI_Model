@@ -52,7 +52,9 @@ def create_app() -> FastAPI:
         allow_origins=[
             "null",  # file:// 方式打开前端时浏览器发送 Origin: null
             "http://127.0.0.1:63342",
-            "http://localhost:63342"
+            "http://localhost:63342",
+            "http://127.0.0.1:4174",
+            "http://localhost:4174",
         ],
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
@@ -82,7 +84,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix=settings.api_prefix)
 
 
-  
+
     app.include_router(admin_wallet.router, prefix=settings.api_prefix)
 
 

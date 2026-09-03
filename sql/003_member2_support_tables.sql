@@ -55,4 +55,3 @@ CREATE TABLE IF NOT EXISTS api_usage_logs (
   PRIMARY KEY (id),
   KEY idx_usage_key_created (key_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='开放平台调用统计';
-
