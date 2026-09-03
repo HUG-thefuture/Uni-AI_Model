@@ -19,7 +19,8 @@ from app.core.response import ok, register_exception_handlers
 from app.bootstrap import startup_initialize
 
 
-from app.routers import (admin_users, api_key, auth, chat, models, stats, tasks, uploads, user, wallet,admin_wallet)
+from app.routers import (admin_models, admin_users, admin_wallet, api_key, auth, chat, models,
+                         open_api, stats, tasks, uploads, user, wallet)
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -83,6 +84,9 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router, prefix=settings.api_prefix)
     app.include_router(uploads.router, prefix=settings.api_prefix)
 
+    # 管理端模型维护与开放平台:此前遗漏注册,导致 /api/admin/models 与 OpenAI 兼容接口不可达。
+    app.include_router(admin_models.router, prefix=settings.api_prefix)
+    app.include_router(open_api.router, prefix=settings.api_prefix)
 
 
 
