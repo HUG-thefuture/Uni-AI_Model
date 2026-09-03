@@ -48,3 +48,14 @@ async def update_user_status(
         "status": user.status,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
     })
+
+
+@router.delete("/{user_id}")
+async def delete_user(
+    user_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """删除账户:级联清理该用户全部关联数据。禁止删除自己与管理员账户。"""
+    result = await user_service.delete_user(db, user_id=user_id, admin_id=admin.id)
+    return ok(result)
