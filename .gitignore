@@ -26,12 +26,15 @@ Thumbs.db
 # 日志
 *.log
 
-# 测试与本地工作文件(不进仓库)
-backend/tests/
+# 本地测试脚本(正式 backend/tests 需要纳入版本控制)
 scripts/test_*.py
 
 # WorkBuddy 项目数据(记忆/技能,不进仓库)
 .workbuddy/
+
+# 本地自检/审核临时产物(含本机绝对路径,不进仓库)
+frontend/自检结果-*.json
+docs/审核测试报告.md
 
 # 成员2 工作包提示词(仅本地,交付记录除外)
 成员2-工作包与提示词/*
