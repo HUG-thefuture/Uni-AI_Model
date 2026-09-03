@@ -4,6 +4,7 @@ from .ai_task import AiTask
 from .api_key import ApiKey
 from .base import TimestampMixin
 from .consumption_record import ConsumptionRecord
+from .invoice import Invoice
 from .model import Model
 from .operation_log import OperationLog
 from .recharge_order import RechargeOrder
@@ -13,6 +14,6 @@ from .user import User, UserProfile, Wallet
 __all__ = [
     "Model", "AiTask", "AiCallLog", "TimestampMixin", "RechargeOrder",
     "ConsumptionRecord", "ApiKey", "ApiUsageLog", "OperationLog",
-    "User", "UserProfile", "Wallet",
+    "User", "UserProfile", "Wallet", "Invoice",
     "ChatMessage", "ChatSession",
 ]

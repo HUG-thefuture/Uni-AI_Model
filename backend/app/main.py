@@ -62,6 +62,8 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(user.router, prefix=settings.api_prefix)
     app.include_router(admin_users.router, prefix=settings.api_prefix)
+    from .routers import admin_wallet
+    app.include_router(admin_wallet.router, prefix=settings.api_prefix)
     for prefix in (settings.api_prefix, "/api/v1"):
         app.include_router(models.router, prefix=prefix)
         app.include_router(admin_models.router, prefix=prefix)
