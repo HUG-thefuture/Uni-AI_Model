@@ -7,6 +7,7 @@
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
   let taskMonitor = null;
+  let chatHistoryLoaded = false;
   const routeTitles = {
     home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
     audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心',
@@ -28,6 +29,8 @@
     // 对话随模型切换自动跟随：每个模型维护各自独立的会话（消息/历史/后端会话id）。
     // chatMessages / chatSessionId / chatHistory 仍是“当前模型会话”的工作副本，切换时通过快照还原。
     chatByModel: {},
+    // 真实模式下服务端会话列表（历史会话侧栏的数据源，含 session_id，可点击回读消息）。
+    chatSessions: [],
     imageMode: '文生图',
     imageRatio: '1:1 1024×1024',
     imageHistory: [],
@@ -411,6 +414,16 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
   }
+  function chatSessionDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const now = new Date();
+    const sameDay = date.toDateString() === now.toDateString();
+    if (sameDay) return '今天';
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return '昨天';
+    return date.toLocaleDateString('zh-CN');
+  }
   function periodMatches(value, period, month) {
     if (period === 'all') return true;
     const key = dateKey(value);
@@ -573,7 +586,7 @@
       <section class="panel chat-layout">
         <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button type="button" class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${escapeHtml(model.name)}" aria-pressed="${state.currentChatModel === model.name}">${escapeHtml(model.name)}<small>${escapeHtml(model.tag)}</small></button>`).join('')}</div></aside>
         <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…（Enter 发送，Shift + Enter 换行）" aria-label="对话内容，按 Enter 发送，Shift 加 Enter 换行"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
-        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('')}</div></aside>
+        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${window.PortalConfig.demoMode ? state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('') : (state.chatSessions.length ? state.chatSessions.map(item => `<div class="history-row" data-chat-session="${escapeHtml(item.session_id)}" role="button" tabindex="0" aria-label="加载会话：${escapeHtml(item.title)}">${escapeHtml(item.title)}<small>${escapeHtml(chatSessionDate(item.updated_at))}</small></div>`).join('') : '<div class="history-row"><small>暂无历史会话</small></div>')}</div></aside>
       </section>`;
   }
 
@@ -1099,6 +1112,7 @@
     if (state.route === 'invoice') loadInvoiceData();
     if (state.route === 'usage') loadUsageData();
     if (state.route === 'apikeys') loadApiKeysData();
+    if (state.route === 'text') loadChatHistory();
     if (state.route === 'admin' && user.role === 'admin') adminLoadActiveTab();
     $('#app').html(shell(state.route, viewFor(state.route)));
     bindEvents();
@@ -1158,6 +1172,46 @@
     state.chatHistory = Array.isArray(conv.history) ? conv.history : [];
     state.chatSessionId = conv.sessionId || null;
   }
+  // 真实模式：从服务端拉取当前用户的历史会话，填入侧栏；失败静默保留本地状态。
+  function loadChatHistory() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return;
+    if (chatHistoryLoaded) return;
+    chatHistoryLoaded = true;
+    window.PortalApi.listChatSessions({ page: 1, page_size: 100 }).then(data => {
+      const items = Array.isArray(data && data.items) ? data.items : [];
+      state.chatSessions = items.map(item => ({
+        session_id: item.session_id,
+        title: item.title || '新会话',
+        model_id: item.model_id,
+        updated_at: item.updated_at || item.created_at || ''
+      }));
+      if (state.route === 'text') render();
+    }).catch(() => { /* 历史会话加载失败不阻断页面 */ });
+  }
+  // 会话变化后强制重拉一次（新建会话成功后刷新侧栏）。
+  function refreshChatHistory() {
+    chatHistoryLoaded = false;
+    loadChatHistory();
+  }
+  // 真实模式：点击历史会话回读该会话的全部消息并切到对应模型。
+  function loadChatSession(sessionId) {
+    if (window.PortalConfig.demoMode || !window.PortalApi) return;
+    window.PortalApi.listSessionMessages(sessionId).then(data => {
+      const items = Array.isArray(data && data.items) ? data.items : [];
+      const lastModelId = items.length ? items[items.length - 1].model_id : null;
+      const model = lastModelId != null ? models.find(item => Number(item.id) === Number(lastModelId)) : null;
+      snapshotCurrentChat();
+      if (model && model.name !== state.currentChatModel) state.currentChatModel = model.name;
+      state.chatSessionId = sessionId;
+      state.chatMessages = items.length
+        ? items.map(item => ({ role: item.role, content: item.content }))
+        : activeChatWelcome();
+      const conv = ensureChatConversation(state.currentChatModel);
+      conv.sessionId = sessionId;
+      conv.messages = state.chatMessages.slice(-100);
+      render();
+    }).catch(error => toast(error && error.message ? error.message : '历史会话加载失败，请稍后重试。', 'error'));
+  }
   // 切换到指定模型并加载其独立的会话；reset=true 时为当前模型另起新会话。
   function activateChatFor(modelName, reset) {
     if (modelName) {
@@ -1205,6 +1259,7 @@
       state.busy.text = false;
       snapshotCurrentChat(); // 把本轮会话结果与会话id归档到当前模型
       persistDemoState();
+      refreshChatHistory(); // 真实模式下新会话已落库，刷新侧栏历史列表
       render();
     });
   }
@@ -1311,6 +1366,13 @@
     });
     $('[data-prompt]').on('click', function () { $('#chat-input').val($(this).data('prompt')).focus(); });
     $('#new-chat, #new-chat-side').on('click', () => { activateChatFor(state.currentChatModel, true); persistDemoState(); render(); });
+    $('[data-chat-session]').on('click keydown', function (event) {
+      if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.type === 'keydown') event.preventDefault();
+      if (state.busy.text) return toast('当前模型仍在生成中，请稍候再切换会话。', 'error');
+      const sessionId = $(this).data('chat-session');
+      if (sessionId != null) loadChatSession(sessionId);
+    });
     $('[data-image-mode]').on('click', function () { state.imageMode = $(this).data('image-mode'); render(); });
     $('[data-ratio]').on('click', function () { state.imageRatio = $(this).data('ratio'); render(); });
     $('#image-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#image-prompt').val().trim(); if (!prompt) return toast('请先填写图像描述词。', 'error'); if (state.busy.image) return; state.busy.image = true; const title = prompt.slice(0, 22) + (prompt.length > 22 ? '…' : ''); const model = currentModel('image'); const submit = window.PortalConfig.demoMode ? Promise.resolve(createRecord('image', { title, mode: state.imageMode, meta: state.imageRatio, shouldFail: shouldSimulateFailure(prompt) })) : (model ? window.PortalApi.task('image', { model_id: model.id, prompt, params: { image_size: state.imageRatio.split(' ')[1].replace('×', 'x'), num: Number($('#image-count').val()) } }).then(result => remoteRecord('image', result, title, state.imageMode, state.imageRatio)) : Promise.reject({ message: '当前没有可用的图像模型。' })); submit.then(() => toast('图像任务已提交，正在生成。', 'success')).catch(error => toast(error && error.message ? error.message : '图像任务提交失败。', 'error')).finally(() => { state.busy.image = false; render(); }); });
