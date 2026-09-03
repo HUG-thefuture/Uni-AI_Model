@@ -321,6 +321,9 @@
     },
     adminDeleteModel(id) {
       return request({ url: `/api/admin/models/${encodeURIComponent(id)}`, method: 'DELETE' });
+    },
+    adminFetchModels(baseUrl, apiKey) {
+      return request({ url: '/api/admin/models/fetch', method: 'POST', data: { base_url: baseUrl, api_key: apiKey } });
     }
   };
 }());

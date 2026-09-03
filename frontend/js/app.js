@@ -909,16 +909,17 @@
     const e = editing || {};
     const vt = ['text', 'image', 'audio', 'video'];
     const vp = ['online', 'local'];
-    const vv = ['siliconflow', 'ollama', 'mock'];
     return `<section class="panel panel-pad invoice-form-panel" style="margin-bottom:16px"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}${editing ? '编辑模型 #' + e.id : '新建模型'}</h2></div></div><form id="admin-model-form" data-model-id="${e.id || ''}"><div class="form-grid">
       <div class="form-block"><label class="field-label" for="am-name">名称<span class="required">*</span></label><input class="field" id="am-name" maxlength="100" required value="${escapeHtml(e.name || '')}" /></div>
       <div class="form-block"><label class="field-label" for="am-code">厂商调用名(model_code)<span class="required">*</span></label><input class="field" id="am-code" maxlength="200" required value="${escapeHtml(e.model_code || '')}" /></div>
       <div class="form-block"><label class="field-label" for="am-type">类型<span class="required">*</span></label><select class="select-field" id="am-type">${vt.map(t => `<option value="${t}" ${e.model_type === t ? 'selected' : ''}>${adminModelTypeLabel(t)}</option>`).join('')}</select></div>
       <div class="form-block"><label class="field-label" for="am-provider">来源(provider)<span class="required">*</span></label><select class="select-field" id="am-provider">${vp.map(p => `<option value="${p}" ${e.provider_type === p ? 'selected' : ''}>${p === 'online' ? '云端' : '本地'}</option>`).join('')}</select></div>
-      <div class="form-block"><label class="field-label" for="am-vendor">厂商<span class="required">*</span></label><select class="select-field" id="am-vendor">${vv.map(v => `<option value="${v}" ${e.vendor === v ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="form-block"><label class="field-label" for="am-vendor">厂商(vendor)<span class="required">*</span></label><input class="field" id="am-vendor" maxlength="30" required value="${escapeHtml(e.vendor || '')}" placeholder="内置 siliconflow / dashscope / ollama / mock，或自定义供应商名" /></div>
+      <div class="form-block"><label class="field-label" for="am-endpoint">base_url(endpoint)</label><input class="field" id="am-endpoint" maxlength="255" placeholder="自定义供应商填写，如 http://127.0.0.1:11434/v1" value="${escapeHtml(e.endpoint || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="am-api-key">api_key(自定义供应商用)</label><input class="field" id="am-api-key" type="password" autocomplete="off" placeholder="${e.api_key ? '已配置（留空表示不修改）' : '自定义供应商填写密钥'}" /></div>
       <div class="form-block"><label class="field-label" for="am-price">单价(积分点/次)<span class="required">*</span></label><input class="field" id="am-price" type="number" min="0" step="1" required value="${e.price_per_call == null ? 0 : e.price_per_call}" /></div>
-      <div class="form-block"><label class="field-label" for="am-endpoint">自定义端点</label><input class="field" id="am-endpoint" maxlength="255" placeholder="本地模型填写" value="${escapeHtml(e.endpoint || '')}" /></div>
       <div class="form-block"><label class="field-label" for="am-duration">音视频时长上限(秒)</label><input class="field" id="am-duration" type="number" min="0" step="1" value="${e.max_duration_sec == null ? '' : e.max_duration_sec}" /></div>
+      <div class="form-block"><label class="field-label">获取可用模型</label><div class="admin-fetch-row"><input class="field" id="am-fetch-endpoint" placeholder="base_url" value="${escapeHtml(e.endpoint || '')}" /><input class="field" id="am-fetch-key" type="password" autocomplete="off" placeholder="api_key" /><button class="btn-secondary" type="button" id="am-fetch-models">获取</button></div><select class="select-field" id="am-fetch-select" style="margin-top:6px"><option value="">— 选择获取到的模型 —</option></select></div>
       </div>
       <div class="form-block"><label class="field-label" for="am-desc">说明</label><textarea class="textarea-field" id="am-desc" maxlength="500" rows="2">${escapeHtml(e.description || '')}</textarea></div>
       <div class="form-block"><label class="field-label" for="am-tags">能力标签(逗号分隔)</label><input class="field" id="am-tags" placeholder="如 对话,推理" value="${escapeHtml((e.capability_tags || []).join(','))}" /></div>
@@ -1746,6 +1747,22 @@
       state.admin.models.editing = null;
       render();
     });
+    $('#am-fetch-models').on('click', function () {
+      const baseUrl = String($('#am-fetch-endpoint').val() || '').trim();
+      const apiKey = String($('#am-fetch-key').val() || '').trim();
+      if (!baseUrl) return toast('请先填写 base_url。', 'error');
+      window.PortalApi.adminFetchModels(baseUrl, apiKey).then(data => {
+        const models = Array.isArray(data && data.models) ? data.models : [];
+        if (!models.length) return toast('未获取到模型，请检查 base_url 与 api_key。', 'error');
+        $('#am-fetch-select').html('<option value="">— 选择获取到的模型 —</option>' + models.map(m => `<option value="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}（${escapeHtml(m.id)}）</option>`).join(''));
+        toast(`已获取 ${models.length} 个模型。`, 'success');
+      }).catch(error => toast(error && error.message ? error.message : '获取模型失败。', 'error'));
+    });
+    $('#am-fetch-select').on('change', function () {
+      const id = $(this).val();
+      const name = $(this).find('option:selected').data('name') || id;
+      if (id) { $('#am-code').val(id); if (!$('#am-name').val()) $('#am-name').val(name); }
+    });
     $('[data-admin-model-edit]').on('click', function () {
       if (!adminIsOn()) return;
       const id = Number($(this).data('admin-model-edit'));
@@ -1783,6 +1800,7 @@
         vendor: String($('#am-vendor').val() || 'siliconflow'),
         price_per_call: Number($('#am-price').val()) || 0,
         endpoint: String($('#am-endpoint').val() || '').trim() || null,
+        api_key: String($('#am-api-key').val() || '').trim() || null,
         max_duration_sec: $('#am-duration').val() === '' ? null : Number($('#am-duration').val()),
         description: String($('#am-desc').val() || '').trim() || null,
         capability_tags: String($('#am-tags').val() || '').split(/[,，]/).map(t => t.trim()).filter(Boolean)

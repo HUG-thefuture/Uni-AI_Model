@@ -23,8 +23,18 @@ from ..models.support import OperationLog
 # 全组冻结的合法枚举值
 VALID_PROVIDER_TYPES = ("online", "local")
 VALID_MODEL_TYPES = ("text", "image", "audio", "video")
-VALID_VENDORS = ("siliconflow", "ollama", "mock")
+VALID_VENDORS = ("siliconflow", "dashscope", "ollama", "mock")
 VALID_STATUSES = ("enabled", "disabled")
+
+# vendor 与 provider_type 的对应关系(与实际生产环境对齐):
+# - siliconflow / dashscope / mock 为云端(online)供应商;
+# - ollama 为本地(local)供应商。
+VENDOR_PROVIDER_TYPE = {
+    "siliconflow": "online",
+    "dashscope": "online",
+    "ollama": "local",
+    "mock": "online",
+}
 
 # 删除前置校验:引用模型且尚未结束的任务状态
 BLOCKING_TASK_STATUSES = ("pending", "processing")
@@ -38,13 +48,20 @@ def _validate_enums(
     model_type: str | None = None,
     vendor: str | None = None,
 ) -> None:
-    """枚举合法性校验,非法返回 400(中文提示)。"""
+    """枚举合法性校验,非法返回 400(中文提示)。
+
+    vendor 支持自定义:内置供应商(siliconflow/dashscope/ollama/mock)需与
+    provider_type 匹配;自定义供应商由 create_model 单独校验 endpoint/api_key。
+    """
     if provider_type is not None and provider_type not in VALID_PROVIDER_TYPES:
         raise APIError(400, "provider_type 非法,仅支持 online/local")
     if model_type is not None and model_type not in VALID_MODEL_TYPES:
         raise APIError(400, "model_type 非法,仅支持 text/image/audio/video")
-    if vendor is not None and vendor not in VALID_VENDORS:
-        raise APIError(400, "vendor 非法,仅支持 siliconflow/ollama/mock")
+    # 内置 vendor 与 provider_type 必须匹配(生产环境约束)
+    if vendor is not None and provider_type is not None and vendor in VENDOR_PROVIDER_TYPE:
+        expected = VENDOR_PROVIDER_TYPE[vendor]
+        if provider_type != expected:
+            raise APIError(400, f"vendor「{vendor}」与 provider_type「{provider_type}」不匹配,应为「{expected}」")
 
 
 def _normalize_config_json(config_json) -> str | None:
@@ -96,7 +113,7 @@ def _model_available(model: Model) -> bool:
       拖慢列表接口(mock 本就不发起外部请求,恒可用)。
     """
     if model.provider_type == "local":
-        from app.providers.local import LocalProvider
+        from ..providers.local import LocalProvider
 
         try:
             return LocalProvider.probe_available(model.endpoint)
@@ -121,8 +138,17 @@ def model_to_portal(model: Model) -> dict:
     }
 
 
+def _mask_api_key(key: str | None) -> str | None:
+    """api_key 脱敏:保留前 3 后 3,中间打码;空值返回 None。"""
+    if not key:
+        return None
+    if len(key) <= 8:
+        return key[:2] + "****"
+    return f"{key[:3]}***{key[-3:]}"
+
+
 def model_to_admin(model: Model) -> dict:
-    """管理端条目:全量字段,config_json 解析为对象输出。"""
+    """管理端条目:全量字段,config_json 解析为对象输出;api_key 脱敏返回。"""
     return {
         "id": model.id,
         "name": model.name,
@@ -131,6 +157,7 @@ def model_to_admin(model: Model) -> dict:
         "model_type": model.model_type,
         "vendor": model.vendor,
         "endpoint": model.endpoint,
+        "api_key": _mask_api_key(model.api_key),
         "price_per_call": model.price_per_call,
         "max_duration_sec": model.max_duration_sec,
         "status": model.status,
@@ -221,9 +248,19 @@ def list_admin_models(
 
 
 def create_model(db: Session, user_id: int, payload) -> Model:
-    """创建模型:枚举校验 + 唯一校验 + 写操作日志。"""
+    """创建模型:枚举校验 + 自定义/本地供应商配置校验 + 唯一校验 + 写操作日志。"""
     _validate_enums(provider_type=payload.provider_type, model_type=payload.model_type,
                     vendor=payload.vendor)
+    # 自定义供应商(不在内置映射中):必须 online 且配置 endpoint(base_url) 与 api_key
+    if payload.vendor not in VENDOR_PROVIDER_TYPE:
+        if payload.provider_type != "online":
+            raise APIError(400, "自定义供应商仅支持 provider_type=online")
+        if not payload.endpoint:
+            raise APIError(400, "自定义供应商必须填写 endpoint(base_url)")
+        if not payload.api_key:
+            raise APIError(400, "自定义供应商必须填写 api_key")
+    if payload.provider_type == "local" and not payload.endpoint:
+        raise APIError(400, "本地模型必须填写 endpoint(如 Ollama 服务地址)")
     _ensure_unique(db, payload.model_code, payload.provider_type)
     model = Model(
         name=payload.name,
@@ -232,6 +269,7 @@ def create_model(db: Session, user_id: int, payload) -> Model:
         model_type=payload.model_type,
         vendor=payload.vendor,
         endpoint=payload.endpoint,
+        api_key=payload.api_key,
         price_per_call=payload.price_per_call,
         max_duration_sec=payload.max_duration_sec,
         description=payload.description,
@@ -271,6 +309,19 @@ def update_model(db: Session, user_id: int, model_id: int, payload) -> Model:
 
     new_code = provided.get("model_code", model.model_code)
     new_provider = provided.get("provider_type", model.provider_type)
+    new_endpoint = provided.get("endpoint", model.endpoint)
+    new_vendor = provided.get("vendor", model.vendor)
+    new_api_key = provided.get("api_key", model.api_key)
+    # 自定义供应商:online + endpoint + api_key 必配
+    if new_vendor not in VENDOR_PROVIDER_TYPE:
+        if new_provider != "online":
+            raise APIError(400, "自定义供应商仅支持 provider_type=online")
+        if not new_endpoint:
+            raise APIError(400, "自定义供应商必须填写 endpoint(base_url)")
+        if not new_api_key:
+            raise APIError(400, "自定义供应商必须填写 api_key")
+    if new_provider == "local" and not new_endpoint:
+        raise APIError(400, "本地模型必须填写 endpoint(如 Ollama 服务地址)")
     if new_code != model.model_code or new_provider != model.provider_type:
         _ensure_unique(db, new_code, new_provider, exclude_id=model.id)
 
@@ -387,3 +438,26 @@ def get_model_detail(db: Session, model_id: int) -> dict:
     detail["daily_stats"] = _daily_stats_7d(db, model_id, since)
     detail["error_stats"] = _error_stats_7d(db, model_id, since)
     return detail
+
+
+async def fetch_available_models(base_url: str, api_key: str) -> dict:
+    """调用 OpenAI 兼容供应商的 GET {base_url}/v1/models 拉取可用模型列表。
+
+    用于后台管理「手动获取可用模型」:输入自定义供应商的 base_url + api_key,
+    拉取该供应商暴露的模型 id,供管理员选择后自定义添加。
+    """
+    import httpx
+
+    url = base_url.rstrip("/") + "/v1/models"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise APIError(502, f"无法连接供应商,请检查 base_url 是否正确: {exc}") from exc
+    if resp.status_code >= 400:
+        raise APIError(502, f"供应商返回错误({resp.status_code}): {resp.text[:200]}")
+    data = resp.json()
+    models = data.get("data") or []
+    items = [{"id": m.get("id"), "name": m.get("id")} for m in models if isinstance(m, dict) and m.get("id")]
+    return {"models": items, "total": len(items)}

@@ -15,8 +15,9 @@ class ModelCreateRequest(BaseModel):
     model_code: str = Field(min_length=1, max_length=200, description="厂商调用名")
     provider_type: str = Field(min_length=1, max_length=20, description="online / local")
     model_type: str = Field(min_length=1, max_length=20, description="text / image / audio / video")
-    vendor: str = Field(min_length=1, max_length=30, description="siliconflow / ollama / mock")
-    endpoint: str | None = Field(default=None, max_length=255, description="自定义端点,本地模型用,可空")
+    vendor: str = Field(min_length=1, max_length=30, description="siliconflow / dashscope / ollama / mock 或自定义供应商名")
+    endpoint: str | None = Field(default=None, max_length=255, description="自定义端点/base_url,本地或自定义供应商用,可空")
+    api_key: str | None = Field(default=None, max_length=255, description="自定义供应商密钥(敏感),内置供应商留空")
     price_per_call: int = Field(ge=0, description="积分点/次,非负整数")
     max_duration_sec: int | None = Field(default=None, ge=0, description="音视频时长上限(秒),可空")
     description: str | None = Field(default=None, max_length=500, description="模型说明")
@@ -33,6 +34,7 @@ class ModelUpdateRequest(BaseModel):
     model_type: str | None = Field(default=None, min_length=1, max_length=20)
     vendor: str | None = Field(default=None, min_length=1, max_length=30)
     endpoint: str | None = Field(default=None, max_length=255)
+    api_key: str | None = Field(default=None, max_length=255)
     price_per_call: int | None = Field(default=None, ge=0)
     max_duration_sec: int | None = Field(default=None, ge=0)
     description: str | None = Field(default=None, max_length=500)
@@ -44,3 +46,10 @@ class ModelStatusRequest(BaseModel):
     """PUT /admin/models/{id}/status 请求体。"""
 
     status: str = Field(min_length=1, max_length=20, description="enabled / disabled")
+
+
+class FetchModelsRequest(BaseModel):
+    """POST /admin/models/fetch 请求体:手动获取供应商可用模型列表。"""
+
+    base_url: str = Field(min_length=1, max_length=255, description="供应商 OpenAI 兼容 base_url")
+    api_key: str = Field(min_length=1, max_length=255, description="供应商 api_key")

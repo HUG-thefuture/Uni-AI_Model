@@ -1,7 +1,9 @@
 """models 表:模型元数据(线上与本地统一存储),成员2负责。
 
 - user_id 不在本表;调用归属在 ai_tasks.user_id(逻辑外键 users.id,见 docs/数据字典.md);
-- config_json 只存温度、max_tokens 等非敏感参数,严禁存任何密钥(密钥只走环境变量)。
+- config_json 只存温度、max_tokens 等非敏感参数,严禁存任何密钥;
+- 内置供应商(siliconflow/dashscope/ollama)的密钥走环境变量;自定义供应商的
+  api_key 存本表(敏感字段,管理端返回时脱敏)。
 """
 from sqlalchemy import BigInteger, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,10 +31,13 @@ class Model(TimestampMixin, Base):
         String(20), nullable=False, comment="text / image / audio / video"
     )
     vendor: Mapped[str] = mapped_column(
-        String(30), nullable=False, comment="siliconflow / ollama / mock"
+        String(30), nullable=False, comment="内置 siliconflow/dashscope/ollama/mock,或自定义供应商名"
     )
     endpoint: Mapped[str | None] = mapped_column(
-        String(255), nullable=True, comment="自定义端点(本地模型用,可空)"
+        String(255), nullable=True, comment="自定义端点/base_url(本地或自定义 OpenAI 兼容供应商用,可空)"
+    )
+    api_key: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="自定义供应商密钥(敏感;内置供应商走环境变量,此字段留空)"
     )
     price_per_call: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0",
