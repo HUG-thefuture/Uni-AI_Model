@@ -1,6 +1,6 @@
 import secrets
 from datetime import datetime
-from sqlalchemy import select,update,func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -16,23 +16,41 @@ def create_order_no()->str:
     return f"{ts}{rand}"
 
 async def get_wallet(user_id: int,db:AsyncSession):
-    stmt=await db.scalar(select(Wallet).where(Wallet.user_id == user_id))
-    if not stmt:
-        stmt=Wallet(user_id=user_id,balance=0,total_consumed=0,total_recharged=0)
-        db.add(stmt)
-        await db.commit()
-        await db.refresh(stmt)
-    return stmt
+    wallet = await db.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    if wallet is None:
+        wallet = Wallet(user_id=user_id,balance=0,total_consumed=0,total_recharged=0)
+        db.add(wallet)
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+        await db.refresh(wallet)
+    return wallet
 
-async def recharge_order(db:AsyncSession,user_id:int,amount:int):
+async def recharge_order(
+    db: AsyncSession, user_id: int, amount: int, payment_method: str = "mock"
+):
     order_no=create_order_no()
     new_order=RechargeOrder(order_no=order_no,user_id=user_id,amount=amount,
-                            points=amount,payment_method='mock',status='paid',created_at=datetime.now())
-    stmt=await get_wallet(user_id,db)
-    db.add(new_order)
-    stmt.balance+=amount
-    stmt.total_recharged+=amount
-    await db.commit()
+                            points=amount,payment_method=payment_method,status='paid',created_at=datetime.now())
+    try:
+        # MySQL 使用行锁避免并发充值互相覆盖；SQLite 测试环境会安全忽略该子句。
+        wallet = await db.scalar(
+            select(Wallet).where(Wallet.user_id == user_id).with_for_update()
+        )
+        if wallet is None:
+            wallet = Wallet(user_id=user_id,balance=0,total_consumed=0,total_recharged=0)
+            db.add(wallet)
+            await db.flush()
+        db.add(new_order)
+        wallet.balance += amount
+        wallet.total_recharged += amount
+        wallet.version = (wallet.version or 0) + 1
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
     await db.refresh(new_order)
     return new_order
 

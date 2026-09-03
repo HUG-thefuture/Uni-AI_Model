@@ -1,9 +1,12 @@
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
+from typing import Literal
 
 class RechargeRequest(BaseModel):
     amount: int=Field(...,gt=0,description="充值金额，必须大于0")
-    payment_method: str=Field(default="mock",description="支付方式")
+    payment_method: Literal["mock", "alipay", "wxpay", "bank"] = Field(
+        default="mock", description="支付方式"
+    )
 
 
 class RechargeResponse(BaseModel):
@@ -34,8 +37,7 @@ class WalletRecordItem(BaseModel):
     status: str  # 状态：'paid' / 'success' / 'failed'
     created_at: datetime  # 发生时间
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 分页响应模型

@@ -165,6 +165,12 @@
     chatSession(payload) {
       return request({ url: '/api/chat/sessions', method: 'POST', data: payload });
     },
+    listChatSessions(params) {
+      return request({ url: `/api/chat/sessions${params ? `?${$.param(params)}` : ''}` });
+    },
+    listSessionMessages(sessionId) {
+      return request({ url: `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages` });
+    },
     streamText(payload, onEvent) {
       const currentToken = token();
       const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };

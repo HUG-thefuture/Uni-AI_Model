@@ -47,7 +47,7 @@ class MockProvider(BaseProvider):
                 raw = None
         if raw is None:
             try:
-                from app.core.config import get_settings
+                from ..core.config import get_settings
 
                 raw = get_settings().mock_delay_sec
             except Exception:  # noqa: BLE001 配置未就绪时按未设置处理
@@ -128,7 +128,7 @@ class MockProvider(BaseProvider):
             import uuid as _uuid
             from pathlib import Path
 
-            from app.core.config import get_settings
+            from ..core.config import get_settings
 
             upload_dir = get_settings().upload_path
             upload_dir.mkdir(parents=True, exist_ok=True)

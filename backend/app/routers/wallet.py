@@ -26,7 +26,7 @@ async def recharge(recharge_data: RechargeRequest, db: AsyncSession = Depends(ge
     if recharge_data.amount <= 0:
         raise APIError(400, "充值金额必须大于0")
     try:
-        stmt=await wallet.recharge_order(db,current_user.id,recharge_data.amount)
+        stmt=await wallet.recharge_order(db,current_user.id,recharge_data.amount,recharge_data.payment_method)
         return ok(RechargeResponse.model_validate(stmt).model_dump(mode="json"))
     except APIError:
         raise
