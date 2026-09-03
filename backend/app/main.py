@@ -85,6 +85,7 @@ def create_app() -> FastAPI:
 
 
 
+
     app.include_router(admin_wallet.router, prefix=settings.api_prefix)
 
 
