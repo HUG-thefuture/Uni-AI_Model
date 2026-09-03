@@ -18,13 +18,11 @@ import asyncio
 import json
 import logging
 import time
-from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
 
 from ..core.config import get_settings
-from ..core.request_id import current_request_id
 from .base import BaseProvider
 from .exceptions import ProviderError
 
@@ -57,6 +55,26 @@ class DashScopeProvider(BaseProvider):
         if extra:
             h.update(extra)
         return h
+
+    async def _get_json(self, url: str, model_type: str) -> dict:
+        """GET 请求(带重试),用于查询异步任务状态;返回解析后的 JSON。"""
+        s = get_settings()
+        retries = max(0, s.provider_max_retries)
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout(model_type)) as client:
+                    resp = await client.get(url, headers=self._headers())
+                if resp.status_code >= 400:
+                    raise self._map_http_error(resp.status_code, resp.text)
+                return resp.json()
+            except ProviderError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt < retries:
+                    await asyncio.sleep(2 ** attempt)
+        raise self._translate(last_exc or Exception("unknown"))
 
     # ---------- 文本(OpenAI 兼容) ----------
 
@@ -184,7 +202,7 @@ class DashScopeProvider(BaseProvider):
         result = await self._poll_image_task(task_id)
         # 把远端图下载落盘,避免 OSS 签名 URL 过期
         urls: list[str] = []
-        upload_dir = Path(get_settings().upload_dir)
+        upload_dir = get_settings().upload_path
         upload_dir.mkdir(parents=True, exist_ok=True)
         for src in result.get("results", []):
             url = src.get("url")
@@ -213,16 +231,7 @@ class DashScopeProvider(BaseProvider):
         deadline = time.monotonic() + max_sec
         while time.monotonic() < deadline:
             await asyncio.sleep(interval)
-            resp = await self._post_with_retry(
-                f"{TASK_QUERY_URL}/{task_id}",
-                headers=self._headers(),
-                json_body={},
-                model_type="image",
-                validate=lambda r: (
-                    self._map_http_error(r.status_code, r.text) if r.status_code >= 400 else None
-                ),
-            )
-            data = resp.json()
+            data = await self._get_json(f"{TASK_QUERY_URL}/{task_id}", "image")
             output = data.get("output") or {}
             status = output.get("task_status")
             if status == "SUCCEEDED":
@@ -245,7 +254,9 @@ class DashScopeProvider(BaseProvider):
             logger.warning("文生图结果下载失败: %s", exc)
             return None
         filename = f"wanx_{_uuid.uuid4().hex}.png"
-        (Path(get_settings().upload_dir) / filename).write_bytes(data)
+        upload_dir = get_settings().upload_path
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        (upload_dir / filename).write_bytes(data)
         return f"/static/{filename}"
 
     # ---------- 语音合成 TTS(qwen-tts) ----------
@@ -297,7 +308,7 @@ class DashScopeProvider(BaseProvider):
         if not content:
             raise ProviderError("provider_bad_response", "声音服务未返回音频内容", url[:200])
         filename = f"tts_{_uuid.uuid4().hex[:12]}.wav"
-        upload_dir = Path(get_settings().upload_dir)
+        upload_dir = get_settings().upload_path
         upload_dir.mkdir(parents=True, exist_ok=True)
         (upload_dir / filename).write_bytes(content)
         return f"/static/{filename}"
@@ -346,16 +357,7 @@ class DashScopeProvider(BaseProvider):
         deadline = time.monotonic() + max_sec
         while time.monotonic() < deadline:
             await asyncio.sleep(interval)
-            resp = await self._post_with_retry(
-                f"{TASK_QUERY_URL}/{task_id}",
-                headers=self._headers(),
-                json_body={},
-                model_type="audio",
-                validate=lambda r: (
-                    self._map_http_error(r.status_code, r.text) if r.status_code >= 400 else None
-                ),
-            )
-            data = resp.json()
+            data = await self._get_json(f"{TASK_QUERY_URL}/{task_id}", "audio")
             output = data.get("output") or {}
             status = output.get("task_status")
             if status == "SUCCEEDED":
