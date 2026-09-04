@@ -203,7 +203,7 @@ pip install -r requirements.txt
 copy .env.example .env        # Linux/macOS: cp .env.example .env
 # 编辑 .env:必填 DATABASE_URL / SECRET_KEY;联调线上模型填 SILICONFLOW_API_KEY
 
-# 4. 初始化数据库与模型(幂等全量建表并同步模型模板)
+# 4. 初始化数据库与模型(幂等建表并同步 docs/ 全部模型模板,含阿里百炼 DashScope 模型)
 #    前置:MySQL 中已存在 ai_portal 库(先执行 sql/000_bootstrap.sql)
 python -m app.init_all
 
@@ -220,9 +220,10 @@ uvicorn app.main:app --reload --port 8000
 
 | 命令 | 作用 |
 | --- | --- |
-| `python -m app.init_all` | 幂等建表并从 `docs/model-config-template.json` 同步全部模型 |
+| `python -m app.init_all` | 幂等建表并同步 docs/ 下全部模型模板(基础 + 阿里百炼 DashScope 等,拉取最新代码后跑这一条即可) |
 | `python -m app.init_db` | 仅建表（兼容旧部署流程） |
 | `python scripts/seed_models.py` | 仅同步模型模板，适合单独刷新模型配置 |
+| `python scripts/seed_dashscope_models.py` | 仅同步阿里百炼 DashScope 模型(通常无需单独执行,init_all 已覆盖) |
 | `python scripts/seed_demo.py` | 演示数据(demo_user/demo_admin、钱包余额 1000、任务/会话/日志),幂等可重复执行 |
 | `python scripts/test_m_series.py` | M-01~M-08 稳定性用例,结果写 `docs/m-series-result.md` |
 

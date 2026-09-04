@@ -35,16 +35,21 @@
 # 1. 配置 Key（.env，只存环境变量）
 DASHSCOPE_API_KEY=sk-xxx            # 阿里云百炼控制台获取
 
-# 2. 幂等写入 5 个 dashscope 模型到 models 表
+# 2. 一步初始化：幂等建表 + 同步全部模型模板（含本文件 5 个 dashscope 模型）
 cd backend
-python scripts/seed_dashscope_models.py
+python -m app.init_all
 
 # 3. 启动后端
 uvicorn app.main:app --reload --port 8000
 ```
 
+`python scripts/seed_dashscope_models.py` 仍可单独刷新 dashscope 模型（init_all 已聚合本模板，通常无需执行）。
+
 写入的 5 个模型：qwen-plus / qwen-turbo（text）、wanx2.1-t2i-turbo（image）、
 qwen-tts（audio，合成）、fun-asr（audio，识别）。
+
+> 团队同步约定：以后新增模型批次只改 docs/ 模板并登记到 `scripts/seed_models.py` 的
+> `TEMPLATE_PATHS`，其他人 `git pull` 后跑一次 `python -m app.init_all` 即可拿到最新模型。
 
 ## 四、端到端验证结果
 

@@ -9,7 +9,8 @@
 - 2 个演示用户 demo_user / demo_admin(密码哈希用 app.core.security.hash_password,
   成员1 用户模块就绪后由注册流程创建,本脚本仅保证演示链路可登录态展示);
 - 钱包(余额 1000 分);
-- 4 个模型(复用 scripts/seed_models.py 的模板 upsert 逻辑,幂等);
+- 全部模板模型(基础 + 阿里百炼 DashScope 等,复用 scripts/seed_models.py 的
+  模板 upsert 逻辑,幂等);
 - 每个模型至少 1 条 succeeded 的 ai_tasks:
   文本模型附 chat_sessions / chat_messages;图像/音频/视频模型 result_url
   使用 /static/ 样例路径;每个模型另写 ai_call_logs 成功记录若干;
@@ -86,7 +87,7 @@ def ensure_users(db) -> dict:
 
 
 def load_models(db) -> list[Model]:
-    """复用 scripts/seed_models.py 的模板 upsert 逻辑写入 4 个模型(幂等)。"""
+    """复用 scripts/seed_models.py 的模板 upsert 逻辑写入全部模板模型(幂等)。"""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import seed_models  # noqa: PLC0415 同目录模块,运行时导入
 

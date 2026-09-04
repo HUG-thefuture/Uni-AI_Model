@@ -1,6 +1,7 @@
 """应用启动与部署初始化辅助函数。
 
-建表使用 SQLAlchemy 的幂等 create_all；模型使用仓库模板做幂等 upsert。
+建表使用 SQLAlchemy 的幂等 create_all；模型使用仓库全部模板(基础 + 各厂商批次,
+见 scripts/seed_models.py 的 TEMPLATE_PATHS)做幂等 upsert。
 启动兜底只在 models 表为空时执行，避免覆盖管理员已维护的模型配置。
 """
 import logging
