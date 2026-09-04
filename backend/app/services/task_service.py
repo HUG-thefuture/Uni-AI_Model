@@ -64,9 +64,9 @@ def _fail_task(db, task: AiTask | None, message: str, start: float) -> None:
 async def _poll_video_result(provider, model, handle: dict) -> list[str]:
     """视频句柄轮询:上游查询接口本期未定(TODO 登记 docs/api.md)。
 
-    - provider 若实现 query_video(model, handle)(Mock 已实现)则按间隔调用,
-      返回 {"status": "completed", "video_url": ...} 即成功;
-    - 无查询能力(线上模型)时仅按配置间隔空轮询,超过 video_poll_max_sec
+    - provider 若实现 query_video(model, handle)(Mock / Online 已实现)则按间隔调用,
+      返回 {"status": "completed", "video_urls": [...] 或 "video_url": ...} 即成功;
+    - 无查询能力时仅按配置间隔空轮询,超过 video_poll_max_sec
       判超时失败「视频生成超时,本次不扣费」。
     """
     s = get_settings()
@@ -205,10 +205,6 @@ async def run_async_task(task_id: int) -> None:
     except Exception as exc:  # noqa: BLE001 兜底:任何异常不得逃逸
         logger.exception("任务 %s 执行异常", task_id)
         error_code = "internal_error"
-        # 结算 flush/commit 失败会让 Session 进入 PendingRollback 状态；
-        # 仅在该数据库异常路径回滚，避免影响 ProviderError 的正常退款/重试流程。
-        db.rollback()
-        task = db.get(AiTask, task_id)
         _fail_task(db, task, "任务执行失败,本次不扣费", start)
     finally:
         try:
@@ -257,7 +253,7 @@ def task_to_item(task: AiTask) -> dict:
 
 
 def task_to_detail(task: AiTask) -> dict:
-    """任务详情:媒体任务把单个或 JSON 数组 result_url 统一为 result_urls。"""
+    """任务详情:媒体任务(image/audio_clone/video)把单个或 JSON 数组 result_url 统一为 result_urls。"""
     item = task_to_item(task)
     if task.task_type in {"image", "audio_clone", "video"} and task.result_url:
         try:

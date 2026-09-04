@@ -1,5 +1,5 @@
 {
-  "_说明": "models 表终版配置导出口径(WP10,与 docs/model-config-template.json 同源,共 4 个模型)。status/config_json 与线上一致;密钥不在本文件——SILICONFLOW_API_KEY 只存环境变量,OLLAMA_BASE_URL 走 .env,models 表中严禁出现任何密钥。config_json 为 JSON 字符串(与 models.config_json Text 列口径一致),只存 temperature/max_tokens 等非敏感参数。status: enabled/disabled。可通过 python scripts/seed_models.py 幂等写入 models 表。",
+  "_说明": "models 表终版配置导出口径(与 docs/model-config-template.json、docs/model-config-dashscope.json 同源,共 9 个模型)。status/config_json 与线上一致;密钥不在本文件——SILICONFLOW_API_KEY/DASHSCOPE_API_KEY 只存环境变量,OLLAMA_BASE_URL 走 .env,models 表中严禁出现任何密钥。config_json 为 JSON 字符串(与 models.config_json Text 列口径一致),只存 temperature/max_tokens 等非敏感参数。status: enabled/disabled。初始化统一入口:python -m app.init_db 一步幂等写入 docs/ 下全部 model-config-*.json(本文件同为种子源之一,条目与源模板一致)。",
   "models": [
     {
       "name": "Qwen2.5-7B 对话(线上)",
@@ -56,6 +56,76 @@
       "config_json": "{\"temperature\": 0.7}",
       "description": "Ollama 本地小参数模型,免费演示与断网兜底",
       "capability_tags": ["对话", "本地"]
+    },
+    {
+      "name": "Qwen-Plus 对话(百炼)",
+      "model_code": "qwen-plus",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "阿里云百炼 Qwen-Plus 对话模型,免费额度,文本对话主链路",
+      "capability_tags": ["对话", "推理", "百炼"]
+    },
+    {
+      "name": "Qwen-Turbo 对话(百炼)",
+      "model_code": "qwen-turbo",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "阿里云百炼 Qwen-Turbo 快速低成本对话模型",
+      "capability_tags": ["对话", "百炼", "快速"]
+    },
+    {
+      "name": "通义万相文生图(百炼)",
+      "model_code": "wanx2.1-t2i-turbo",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 10,
+      "max_duration_sec": 120,
+      "status": "enabled",
+      "config_json": "{\"image_size\": \"1024*1024\", \"num\": 1}",
+      "description": "阿里云百炼通义万相文生图模型,异步提交轮询出图",
+      "capability_tags": ["图像生成", "百炼"]
+    },
+    {
+      "name": "Qwen-TTS 声音合成(百炼)",
+      "model_code": "qwen-tts",
+      "provider_type": "online",
+      "model_type": "audio",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 2,
+      "max_duration_sec": 300,
+      "status": "enabled",
+      "config_json": "{}",
+      "description": "阿里云百炼语音合成模型,文本转语音",
+      "capability_tags": ["语音合成", "百炼"]
+    },
+    {
+      "name": "Fun-ASR 语音识别(百炼)",
+      "model_code": "fun-asr",
+      "provider_type": "online",
+      "model_type": "audio",
+      "vendor": "dashscope",
+      "endpoint": null,
+      "price_per_call": 2,
+      "max_duration_sec": 300,
+      "status": "enabled",
+      "config_json": "{}",
+      "description": "阿里云百炼语音识别模型,音频转文本(需公网音频地址)",
+      "capability_tags": ["语音识别", "百炼"]
     }
   ]
 }

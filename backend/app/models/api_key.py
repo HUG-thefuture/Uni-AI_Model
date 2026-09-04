@@ -16,14 +16,14 @@ class ApiKey(Base):
         {'mysql_engine': 'InnoDB', 'mysql_charset': 'utf8mb4'}
     )
     id: Mapped[int] = pk_column()
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 users.id")
     name: Mapped[str] = mapped_column(String(100), nullable=False, comment="Key 名称")
     key_prefix: Mapped[str] = mapped_column(String(20), nullable=False, comment="Key 前缀")
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False, comment="Key 哈希值，仅保存哈希")
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default='enabled', comment="enabled / disabled / expired")
-    use_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="累计调用次数")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='enabled', server_default='enabled', comment="enabled / disabled / expired")
+    use_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default='0', comment="累计调用次数")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="过期时间")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())

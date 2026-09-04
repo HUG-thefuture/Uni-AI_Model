@@ -1,34 +1,42 @@
-"""建表入口:自动建 14 张表。
+"""初始化入口(一步到位):建表 + 写入全部模型种子。
 
-两种运行方式均可:
-1. PyCharm 直接右键 Run 'init_db'(或命令行:python backend/app/init_db.py);
-2. 在 backend/ 目录执行:python -m app.init_db。
+在 backend/ 目录执行:
 
-全量自动建表:users/user_profiles/wallets、models/ai_tasks/ai_call_logs、
-chat_sessions/chat_messages/api_usage_logs、api_keys/consumption_records/
-operation_logs/recharge_orders/invoices,共 14 张(与 sql/ 目录脚本同口径)。
-只适用于空库/幂等补建;已存在表不会被 create_all 变更列结构。
+    python -m app.init_db                # 建表 + 幂等写入 docs/ 全部模型模板(推荐)
+    python -m app.init_db --schema-only  # 仅建表,不写模型种子(兼容旧口径)
+
+模型模板在仓库根 docs/ 下(model-config-*.json,含阿里百炼 dashscope 5 个模型)。
+新增厂商模型只需在 docs/ 加一个模板 JSON:其他人 git pull 后执行本命令,
+即可拿到最新模型数据,无需改代码、无需再单独跑 seed 脚本。
 """
 import sys
-from pathlib import Path
 
-# 允许把本文件当普通脚本直接运行:把 backend/ 加入 sys.path 以导入 app.*
-BACKEND_DIR = Path(__file__).resolve().parents[1]
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
-
-from app.core.db import init_db  # noqa: E402
+from .core.db import Base, init_db as create_tables
+from .model_seed import seed_all_models
 
 
 def main() -> int:
+    """默认一步初始化(建表 + 全量模型种子);--schema-only 仅建表。"""
+    if "--schema-only" in sys.argv[1:]:
+        report = create_tables()
+        print("建表/结构对齐完成(未写模型种子):" + ", ".join(sorted(Base.metadata.tables)))
+        print(f"[init] 新增列 {len(report.added_columns)}，新增索引 {len(report.created_indexes)}")
+        return 0
     try:
-        tables = init_db()
-    except Exception as exc:  # noqa: BLE001 给 CLI 用户明确中文错误
-        print(f"建表失败: {exc}", file=sys.stderr)
+        result = seed_all_models()
+    except Exception as exc:  # noqa: BLE001 环境变量缺失/模板缺失给出明确提示
+        print(f"[init] 初始化失败: {exc}", file=sys.stderr)
+        print("[init] 请在 backend/ 目录下执行,并确认 .env 已配置 DATABASE_URL / SECRET_KEY",
+              file=sys.stderr)
         return 1
-    print(f"建表完成,共 {len(tables)} 张表:")
-    for name in tables:
-        print(f"  - {name}")
+    report = result.pop("schema_report", None)
+    schema_message = ""
+    if report is not None:
+        schema_message = (f"; 结构新增列 {len(report.added_columns)}、"
+                          f"索引 {len(report.created_indexes)}")
+    print(f"[init] 初始化完成: 建表 {len(Base.metadata.tables)} 张; "
+          f"模型共 {result['total']} 个(新增 {result['created']}, 更新 {result['updated']}), "
+          f"模板: {', '.join(result['files'])}{schema_message}")
     return 0
 
 

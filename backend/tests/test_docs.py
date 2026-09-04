@@ -85,11 +85,11 @@ def test_packaging_checklist():
 def test_model_config_final_json():
     data = json.loads(_read("docs/model-config-final.json"))
     models = data["models"]
-    assert len(models) == 4
+    assert len(models) == 9
     codes = {m["model_code"] for m in models}
     assert "Qwen/Qwen2.5-7B-Instruct" in codes
     vendors = {m["vendor"] for m in models}
-    assert vendors <= {"siliconflow", "ollama", "mock"}
+    assert vendors <= {"siliconflow", "ollama", "dashscope", "mock"}
     for m in models:
         assert m["provider_type"] in ("online", "local")
         assert m["model_type"] in ("text", "image", "audio", "video")

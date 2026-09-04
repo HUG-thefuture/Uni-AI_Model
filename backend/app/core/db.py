@@ -9,22 +9,18 @@
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator, Generator
-from functools import partial
-from typing import Any, Callable, TypeVar
+from collections.abc import AsyncGenerator, Callable, Generator
+from typing import TypeVar
 
 T = TypeVar("T")
-from fastapi import Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
-from app.core.config import get_settings
-from app.core.response import APIError
-from app.core.security import decode_token
-# from app.models.user import User
+from .config import get_settings
+
+_db_logger = logging.getLogger("app.db")
 
 class Base(DeclarativeBase):
     pass
@@ -40,7 +36,7 @@ def _build_engine():
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
     else:
-        # MySQL:连接池与回收,避免长时间空闲后断连(WP09 固化:20/10/1800)
+        # MySQL:固定连接池与回收策略,避免高并发时连接数失控。
         kwargs.update(pool_size=20, max_overflow=10, pool_recycle=1800)
     return create_engine(url, **kwargs)
 
@@ -48,28 +44,24 @@ def _build_engine():
 engine = _build_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
 
-_db_logger = logging.getLogger("app.db")
 
-
+@event.listens_for(engine, "before_cursor_execute")
 def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     conn.info["_query_started"] = time.perf_counter()
 
 
+@event.listens_for(engine, "after_cursor_execute")
 def _after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     started = conn.info.pop("_query_started", None)
     if started is None:
         return
+    elapsed_ms = (time.perf_counter() - started) * 1000
     try:
         threshold = get_settings().slow_query_ms
-    except Exception:
+    except Exception:  # pragma: no cover - only protects diagnostics
         threshold = 500
-    elapsed_ms = (time.perf_counter() - started) * 1000
     if elapsed_ms >= threshold:
         _db_logger.warning("慢查询 %.0fms SQL=%s", elapsed_ms, str(statement)[:200])
-
-
-event.listen(engine, "before_cursor_execute", _before_cursor_execute)
-event.listen(engine, "after_cursor_execute", _after_cursor_execute)
 
 
 def _async_url(url: str) -> str:
@@ -96,15 +88,6 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def run_db(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """把同步 DB 函数放到默认线程池执行,避免阻塞事件循环。
-
-    用法:``await run_db(sync_fn, db, arg1, kw=1)``。
-    """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(fn, *args, **kwargs))
-
-
 def get_db() -> Generator[Session, None, None]:
     """FastAPI 依赖:每请求一个会话。"""
     db = SessionLocal()
@@ -120,69 +103,15 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         yield db
 
 
-EXPECTED_TABLE_NAMES = {
-    # 用户侧
-    "users",
-    "user_profiles",
-    "wallets",
-    # 模型与任务
-    "models",
-    "ai_tasks",
-    "ai_call_logs",
-    # 会话与开放平台
-    "chat_sessions",
-    "chat_messages",
-    "api_usage_logs",
-    # 财务与支撑
-    "api_keys",
-    "consumption_records",
-    "operation_logs",
-    "recharge_orders",
-    "invoices",
-}
+def init_db():
+    """创建并增量对齐全部 ORM 表结构，返回同步报告。"""
+    from .. import models  # noqa: F401 注册全部模型映射，包括发票和支撑表
+    from ..schema_sync import sync_schema
+
+    return sync_schema(engine, Base.metadata)
 
 
-def init_db() -> list[str]:
-    """建表:先 import app.models 注册全部模型,再 create_all(MySQL 已有表不变更)。
-
-    若注册不全,直接抛错而不是静默少建表;返回实际注册/建出的表名(排序)。
-    """
-    from app import models  # noqa: F401,F811 导入即注册全部模型映射
-
-    actual = set(Base.metadata.tables)
-    missing = EXPECTED_TABLE_NAMES - actual
-    if missing:
-        raise RuntimeError(
-            "模型注册缺失,无法自动建表: %s"
-            "(请检查 app/models/__init__.py 是否已 import 对应模型)"
-            % ", ".join(sorted(missing))
-        )
-    Base.metadata.create_all(bind=engine)
-    return sorted(actual)
-
-
-#获取解析 token → 查用户 → 校验未禁用
-# bearer_scheme = HTTPBearer(auto_error=False)#自动解析请求头里的 Bearer Token
-# async def get_current_user(
-# credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-#     db: AsyncSession = Depends(get_async_db),
-# ) -> User:
-#     if credentials is None:
-#         raise APIError(401,"未登录或凭证无效")
-#     try:
-#         head = decode_token(credentials.credentials)
-#         user_id = int(head["sub"])
-#     except Exception:
-#         raise APIError(401, "登录凭证无效或已过期") from None
-#
-#     user = await db.get(User, user_id)
-#     if user is None:
-#         raise APIError(401, "未登录或凭证失效")
-#     if user.status != 1:
-#         raise APIError(403, "账号已被禁用")
-#     return user
-
-
-
-
+async def run_db(fn: Callable[..., T], /, *args, **kwargs) -> T:
+    """在线程池执行同步数据库操作，避免阻塞事件循环。"""
+    return await asyncio.to_thread(fn, *args, **kwargs)
 

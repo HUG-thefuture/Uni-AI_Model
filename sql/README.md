@@ -1,25 +1,14 @@
-# sql：数据库脚本（MySQL 8.0）
+# sql：数据库脚本
 
-## 文件与执行顺序
+## 推荐入口
 
-按以下顺序执行一次即可（每张表在仓库内只定义一次，重复执行不会互相覆盖）：
+- 全新 MySQL 库：执行 `001_canonical_schema.sql`。
+- 已有库或不确定由哪份旧脚本创建：在 `backend/` 执行
+  `python -m app.schema_sync --apply`；该命令以 ORM 为准补齐缺表、缺列和缺索引，
+  不删除字段或数据。
+- 检查但不修改：`python -m app.schema_sync --check`。返回码为 1 表示仍有缺失结构。
+- 一步完成结构对齐并写入模型种子：`python -m app.init_db`。
 
-1. `000_bootstrap.sql`：创建 `ai_portal` 库（utf8mb4）。
-2. `002_member2_models_ai_tasks.sql`：models / ai_tasks / ai_call_logs。
-3. `003_member2_support_tables.sql`：chat_sessions / chat_messages / api_usage_logs。
-4. `003_member4_wallets_recharge_orders.sql`：users / user_profiles / wallets /
-   recharge_orders / invoices / consumption_records / api_keys / operation_logs。
-
-合计 14 张表，与 `backend/app/models/` 的 ORM 一一对应。
-
-## 与 `python -m app.init_db` 的关系
-
-- `python -m app.init_db`（在 backend/ 目录执行）会按 ORM 自动建同样的 14 张表，
-  并在注册不全时直接报错，避免静默缺表。
-- 两条路径二选一，不要在生产库混跑；`create_all` 只补建缺失表，
-  不会给已存在的表补列或改结构，结构变更需要单独写迁移 SQL。
-
-## 示例数据
-
-演示账号/任务数据见 `backend/scripts/seed_demo.py`；
-模型种子数据见 `backend/scripts/seed_models.py`（模板 `docs/model-config-template.json`）。
+`002_member2_*.sql`、`003_member*.sql`、`004_user_schema_alignment.sql` 是历史拆分脚本，
+保留用于追溯，不应再单独或按顺序执行。新库请使用 `001_canonical_schema.sql`；旧库请使用
+程序同步入口，避免 `CREATE TABLE IF NOT EXISTS` 掩盖字段漂移。

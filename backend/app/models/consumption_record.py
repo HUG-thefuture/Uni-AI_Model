@@ -20,14 +20,14 @@ class ConsumptionRecord(Base):
     )
 
     id: Mapped[int] = pk_column()
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 users.id")
     task_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 ai_tasks.id")
     model_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 models.id")
 
-    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="消费金额(分)")
-    balance_before: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="扣费前余额")
-    balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="扣费后余额")
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="消费金额(分)")
+    balance_before: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="扣费前余额")
+    balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="扣费后余额")
 
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default='success',
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='success', server_default='success',
                                         comment="success / failed / refunded")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

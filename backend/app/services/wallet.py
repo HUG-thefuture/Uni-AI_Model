@@ -1,12 +1,12 @@
 import secrets
 from datetime import datetime
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
 from ..models.consumption_record import ConsumptionRecord
-from ..models.recharge_order import RechargeOrder
 from ..models.invoice import Invoice
+from ..models.recharge_order import RechargeOrder
 from ..models.user import Wallet
 
 
@@ -92,14 +92,17 @@ async def get_user_records(db:AsyncSession,user_id:int,page:int=1,page_size:int=
         "page_size":page_size,
     }
 
+
 async def get_user_invoices(db: AsyncSession, user_id: int, page: int = 1, page_size: int = 10) -> dict:
-    """返回当前用户的发票申请记录，金额沿用钱包的“分”口径。"""
+    """返回当前用户的发票申请记录,金额沿用钱包的「分」口径。"""
     offset = (page - 1) * page_size
-    stmt = (select(Invoice)
-            .where(Invoice.user_id == user_id)
-            .order_by(Invoice.created_at.desc())
-            .offset(offset)
-            .limit(page_size))
+    stmt = (
+        select(Invoice)
+        .where(Invoice.user_id == user_id)
+        .order_by(Invoice.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
     invoices = (await db.scalars(stmt)).all()
     total = await db.scalar(select(func.count()).select_from(Invoice).where(Invoice.user_id == user_id))
     return {

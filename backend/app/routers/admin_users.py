@@ -1,21 +1,20 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_async_db
-from app.core.deps import require_admin
-from app.core.response import ok
-from app.models.user import User
-from app.schemas.user import (
+from ..core.db import get_async_db
+from ..core.deps import require_admin
+from ..core.response import ok
+from ..models.user import User
+from ..schemas.user import (
     AdminBalanceIn,
     AdminResetPasswordIn,
     AdminUserUpdateIn,
     PageResult,
     StatusUpdateIn,
 )
-from app.services import user as user_service
+from ..services import user as user_service
 
-router = APIRouter(prefix="/admin/users",
-                   tags=["管理端-用户"])
+router = APIRouter(prefix="/admin/users", tags=["管理端-用户"])
 
 
 @router.get("")
@@ -32,11 +31,12 @@ async def list_users(
     db: AsyncSession = Depends(get_async_db),
 ):
     """用户列表:分页 + 关键字/角色/状态/余额区间筛选,默认排除软删除。"""
-    total, items = await user_service.list_users(
-        db, page, page_size, keyword, role, status,
-        balance_min, balance_max, bool(include_deleted),
+    result = await user_service.list_users(
+        db, page=page, page_size=page_size, keyword=keyword, role=role, status=status,
+        balance_min=balance_min, balance_max=balance_max, include_deleted=bool(include_deleted),
     )
-    return ok(PageResult(total=total, page=page, page_size=page_size, items=items).model_dump(mode="json"))
+    return ok(PageResult(total=result["total"], page=result["page"],
+                         page_size=result["page_size"], items=result["items"]).model_dump(mode="json"))
 
 
 @router.get("/{user_id}")
@@ -69,8 +69,8 @@ async def update_status(
     current: User = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """启用/禁用用户:禁用后登录态立即失效(鉴权时校验 status)。"""
-    user = await user_service.update_user_status(db, user_id, payload.status, current)
+    """启用/禁用用户:禁用后登录态立即失效。"""
+    user = await user_service.update_user_status(db, user_id=user_id, status=payload.status, admin_id=current.id)
     return ok({"id": user.id, "status": user.status, "updated_at": str(user.updated_at)})
 
 
