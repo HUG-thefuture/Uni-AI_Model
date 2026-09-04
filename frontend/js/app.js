@@ -7,10 +7,12 @@
   const DEMO_STORAGE_KEY = 'ai_portal_demo_state_v1';
   const taskTimers = new Map();
   let taskMonitor = null;
+  let chatHistoryLoaded = false;
   const routeTitles = {
     home: '首页', models: '模型广场', text: '文本交互舱', image: '图像生成室',
     audio: '声音创作坊', video: '视频合成站', tasks: '创作历史', profile: '个人中心',
-    billing: '个人账单', invoice: '发票管理', 'admin-models': '模型管理'
+    billing: '个人账单', invoice: '发票管理', usage: '用量统计', apikeys: 'API Key 管理',
+    admin: '管理后台'
   };
 
   const state = {
@@ -24,6 +26,11 @@
     chatSessionId: null,
     chatMessages: [{ role: 'assistant', content: '你好！我是你的 AI 创意助手。你可以让我协助优化文案、解释知识点，或开始一次创作。' }],
     chatHistory: [{ title: '欢迎使用 AI 助手', date: '今天' }],
+    // 对话随模型切换自动跟随：每个模型维护各自独立的会话（消息/历史/后端会话id）。
+    // chatMessages / chatSessionId / chatHistory 仍是“当前模型会话”的工作副本，切换时通过快照还原。
+    chatByModel: {},
+    // 真实模式下服务端会话列表（历史会话侧栏的数据源，含 session_id，可点击回读消息）。
+    chatSessions: [],
     imageMode: '文生图',
     imageRatio: '1:1 1024×1024',
     imageHistory: [],
@@ -41,7 +48,18 @@
     busy: { text: false, image: false, audio: false, video: false, profile: false, recharge: false },
     billing: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, tab: 'usage', period: 'all', month: new Date().toISOString().slice(0, 7), type: 'all' },
     invoice: { loaded: false, loading: false, error: '', wallet: null, records: [], page: 1, pageSize: 10, period: 'all', month: new Date().toISOString().slice(0, 7), formOpen: false, formBusy: false },
-    adminModels: { loaded: false, loading: false, error: '', items: [], page: 1, pageSize: 10, total: 0, formOpen: false, editingId: null, formBusy: false, fetchBusy: false, fetchModels: [] }
+    usage: { loaded: false, loading: false, error: '', stats: null },
+    apiKeys: { loaded: false, loading: false, error: '', records: [], busyId: null, createOpen: false, createBusy: false, created: null },
+    admin: {
+      tab: 'overview', loading: false, error: '',
+      overview: null,
+      users: { records: [], total: 0, page: 1, pageSize: 10, keyword: '', role: '', status: '', loaded: false, busyId: null, formOpen: false, editing: null, busy: false },
+      models: { records: [], total: 0, page: 1, pageSize: 10, keyword: '', loaded: false, busyId: null, formOpen: false, editing: null, busy: false },
+      wallets: { records: [], total: 0, page: 1, pageSize: 10, keyword: '', loaded: false },
+      orders: { records: [], total: 0, page: 1, pageSize: 10, loaded: false },
+      consumptions: { records: [], total: 0, page: 1, pageSize: 10, loaded: false },
+      invoices: { records: [], total: 0, page: 1, pageSize: 10, loaded: false, busyId: null }
+    }
   };
 
   let user = { name: '用户', initial: 'U', balance: '—', school: '未加载学校', realName: '未认证', role: 'user' };
@@ -51,7 +69,7 @@
     ['audio', '声音创作坊', 'layui-icon-voice'], ['video', '视频合成站', 'layui-icon-video'],
     ['tasks', '创作历史', 'layui-icon-list'], ['profile', '个人中心', 'layui-icon-user'],
     ['billing', '个人账单', 'layui-icon-rmb'], ['invoice', '发票管理', 'layui-icon-file'],
-    ['admin-models', '模型管理', 'layui-icon-set']
+    ['usage', '用量统计', 'layui-icon-chart'], ['apikeys', 'API Key 管理', 'layui-icon-key']
   ];
   let models = [
     { name: 'qwen3.7-plus', type: '语言模型', group: '国产顶级模型', source: '云端模型', tag: '深度思考', discount: '6折', desc: '适合问答、写作、代码与复杂任务规划的高质量语言模型。', tone: 'linear-gradient(135deg,#386ee5,#7951d4)' },
@@ -148,7 +166,7 @@
     return api.models().then(items => {
       const typeNames = { text: '语言模型', image: '生图模型', audio: 'TTS模型', video: '生视频模型' };
       models = items.filter(item => item.available !== false).map((item, index) => ({
-        id: item.id, name: item.name, modelType: item.model_type, vendor: item.vendor,
+        id: item.id, name: item.name, modelType: item.model_type,
         type: typeNames[item.model_type] || '其他模型',
         group: item.provider_type === 'local' ? '私域知识模型' : '云端模型',
         source: item.provider_type === 'local' ? '私域模型' : '云端模型',
@@ -158,30 +176,11 @@
         desc: item.description || '已接入平台模型服务。',
         tone: ['#386ee5', '#7951d4', '#2eaf91', '#bd4caf'][index % 4]
       }));
-      // 媒体模型默认选中可用云端模型:优先 dashscope(百炼已配 key),否则取第一个
-      ['image', 'audio', 'video'].forEach(type => {
-        if (state.selectedModelIds[type] == null) {
-          const preferred = models.find(m => m.modelType === type && m.vendor === 'dashscope') || models.find(m => m.modelType === type);
-          if (preferred) state.selectedModelIds[type] = preferred.id;
-        }
-      });
       const selected = currentModel('text');
-      if (selected) state.currentChatModel = selected.name;
+      if (selected) activateChatFor(selected.name);
     }).catch(error => {
       toast(error && error.message ? `模型列表加载失败：${error.message}` : '模型列表加载失败，请稍后刷新。', 'error');
     });
-  }
-
-  function loadChatHistory() {
-    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return Promise.resolve();
-    return window.PortalApi.listSessions(1, 50).then(data => {
-      const rows = Array.isArray(data && data.items) ? data.items : [];
-      state.chatHistory = rows.map(item => ({
-        id: item.session_id,
-        title: item.title || '新会话',
-        date: item.updated_at ? String(item.updated_at).slice(5, 16).replace('T', ' ') : ''
-      }));
-    }).catch(() => undefined);
   }
 
   function loadTaskHistory() {
@@ -231,10 +230,8 @@
         if (!state.activeAudioTaskId && state.audioHistory[0]) state.activeAudioTaskId = String(state.audioHistory[0].id);
         state.videoHistory = state.tasks.filter(item => item.kind === 'video');
         if (!state.activeVideoTaskId && state.videoHistory[0]) state.activeVideoTaskId = String(state.videoHistory[0].id);
-        const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#image-form, #audio-form, #video-form, #recharge-form, #invoice-form');
-        const rechargeOpen = $('#recharge-panel').length && !$('#recharge-panel').prop('hidden');
-        const invoiceOpen = $('#invoice-form').length > 0;
-        if (!editing && !rechargeOpen && !invoiceOpen && ['image', 'audio', 'video', 'tasks', 'profile'].includes(state.route)) render();
+        const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#image-form, #audio-form, #video-form');
+        if (!editing && ['image', 'audio', 'video', 'tasks', 'profile'].includes(state.route)) render();
       }).catch(() => undefined);
     }, 3000);
   }
@@ -272,6 +269,28 @@
       ['modelType', 'modelGroup', 'modelSource', 'keyword', 'currentChatModel', 'imageMode', 'imageRatio', 'audioMode', 'selectedVoice', 'videoDuration'].forEach(key => {
         if (typeof saved[key] === 'string') state[key] = normalizeText(saved[key], state[key], 100);
       });
+      // 逐模型会话：新格式直接载入；旧存档（无 chatByModel）时把单一历史挂到当前模型名下。
+      if (saved.chatByModel && typeof saved.chatByModel === 'object') {
+        const entries = Object.entries(saved.chatByModel);
+        entries.forEach(([name, conv]) => {
+          if (!name || !conv || typeof conv !== 'object') return;
+          state.chatByModel[name] = {
+            messages: Array.isArray(conv.messages) ? conv.messages.filter(item => item && typeof item === 'object').slice(-100) : activeChatWelcome(),
+            history: Array.isArray(conv.history) ? conv.history.slice(0, 100) : [],
+            sessionId: conv.sessionId || null
+          };
+        });
+      } else if (state.chatMessages.length || state.chatHistory.length) {
+        // 旧存档（无 chatByModel）迁移：把已载入工作副本的单一会话挂到当前模型名下，
+        // 避免随后 syncActiveChatToCurrentModel 用默认欢迎语覆盖掉历史对话。
+        const key = state.currentChatModel || 'default';
+        state.chatByModel[key] = {
+          messages: state.chatMessages.slice(-100),
+          history: state.chatHistory.slice(0, 100),
+          sessionId: state.chatSessionId || null
+        };
+      }
+      syncActiveChatToCurrentModel();
       if (saved.user && typeof saved.user === 'object') {
         user = {
           name: normalizeText(saved.user.name, user.name, 30),
@@ -291,6 +310,15 @@
     const snapshot = {
       chatMessages: state.chatMessages.slice(-100),
       chatHistory: state.chatHistory.slice(0, 100),
+      chatByModel: Object.keys(state.chatByModel).reduce((acc, name) => {
+        const conv = state.chatByModel[name] || {};
+        acc[name] = {
+          messages: Array.isArray(conv.messages) ? conv.messages.slice(-100) : [],
+          history: Array.isArray(conv.history) ? conv.history.slice(0, 100) : [],
+          sessionId: conv.sessionId || null
+        };
+        return acc;
+      }, {}),
       imageHistory: state.imageHistory.slice(0, 100),
       audioHistory: state.audioHistory.slice(0, 100),
       videoHistory: state.videoHistory.slice(0, 100),
@@ -386,6 +414,16 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
   }
+  function chatSessionDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const now = new Date();
+    const sameDay = date.toDateString() === now.toDateString();
+    if (sameDay) return '今天';
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return '昨天';
+    return date.toLocaleDateString('zh-CN');
+  }
   function periodMatches(value, period, month) {
     if (period === 'all') return true;
     const key = dateKey(value);
@@ -452,7 +490,7 @@
     return `<div class="page-head"><div><h1 class="page-title">${title}</h1><p class="page-subtitle">${subtitle}</p></div>${action || ''}</div>`;
   }
   function navTemplate(route) {
-    return navItems.filter(([id]) => id !== 'admin-models' || user.role === 'admin').map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}"${route === id ? ' aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('');
+    return navItems.map(([id, label, iconName]) => `<a class="side-link ${route === id ? 'active' : ''}" href="#/${id}"${route === id ? ' aria-current="page"' : ''}>${icon(iconName)}<span>${label}</span></a>`).join('');
   }
   function shell(route, content) {
     return `
@@ -474,6 +512,9 @@
               <div class="account-menu-divider" role="separator"></div>
               <button class="account-menu-item" type="button" role="menuitem" data-route="profile">${icon('layui-icon-user')}<span>个人中心</span></button>
               <button class="account-menu-item" type="button" role="menuitem" data-route="tasks">${icon('layui-icon-list')}<span>创作历史</span></button>
+              <button class="account-menu-item" type="button" role="menuitem" data-route="usage">${icon('layui-icon-chart')}<span>用量统计</span></button>
+              <button class="account-menu-item" type="button" role="menuitem" data-route="apikeys">${icon('layui-icon-key')}<span>API Key 管理</span></button>
+              ${user.role === 'admin' ? `<button class="account-menu-item" type="button" role="menuitem" data-route="admin">${icon('layui-icon-set')}<span>管理后台</span></button>` : ''}
               <div class="account-menu-divider" role="separator"></div>
               ${window.PortalConfig.demoMode
                 ? `<button class="account-menu-item account-menu-item-disabled" type="button" role="menuitem" aria-disabled="true" disabled title="演示模式未建立真实登录状态">${icon('layui-icon-logout')}<span>退出登录</span><small>演示模式</small></button>`
@@ -545,7 +586,7 @@
       <section class="panel chat-layout">
         <aside class="chat-models"><strong style="font-size:14px">可用模型</strong><div class="chat-list">${chatModels.map(model => `<button type="button" class="chat-model-option ${state.currentChatModel === model.name ? 'active' : ''}" data-chat-model="${escapeHtml(model.name)}" aria-pressed="${state.currentChatModel === model.name}">${escapeHtml(model.name)}<small>${escapeHtml(model.tag)}</small></button>`).join('')}</div></aside>
         <div class="chat-main"><div class="chat-toolbar"><div><strong>${escapeHtml(state.currentChatModel)}</strong><span> · 已准备就绪</span></div><button class="btn-secondary" id="new-chat" type="button">${icon('layui-icon-add-1')} 新建会话</button></div><div class="messages" id="message-list" role="log" aria-live="polite" aria-label="对话消息">${messages}</div><div class="chat-compose"><textarea id="chat-input" class="textarea-field" maxlength="2000" placeholder="输入你的问题或指令…（Enter 发送，Shift + Enter 换行）" aria-label="对话内容，按 Enter 发送，Shift 加 Enter 换行"></textarea><div class="compose-foot"><div class="chip-row"><button type="button" class="prompt-chip" data-prompt="请帮我优化下面这段文案：">文案优化</button><button type="button" class="prompt-chip" data-prompt="请把下面内容翻译成英文：">翻译</button><button type="button" class="prompt-chip" data-prompt="请用 Python 写一个函数：">代码编写</button></div><button class="btn-primary" id="send-chat" type="button" ${state.busy.text ? 'disabled' : ''}>${state.busy.text ? '生成中…' : '发送'} ${icon('layui-icon-release')}</button></div></div></div>
-        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${state.chatHistory.length ? state.chatHistory.map(item => `<div class="history-row" data-chat-session="${escapeHtml(item.id)}" role="button" tabindex="0">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('') : '<div class="history-row">暂无历史会话，发送消息后自动保存。</div>'}</div></aside>
+        <aside class="chat-history"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:14px">历史会话</strong><button class="btn-quiet" id="new-chat-side" type="button" aria-label="新建会话" title="新建会话">${icon('layui-icon-add-1')}</button></div><div style="margin-top:14px">${window.PortalConfig.demoMode ? state.chatHistory.map(item => `<div class="history-row">${escapeHtml(item.title)}<small>${escapeHtml(item.date)}</small></div>`).join('') : (state.chatSessions.length ? state.chatSessions.map(item => `<div class="history-row" data-chat-session="${escapeHtml(item.session_id)}" role="button" tabindex="0" aria-label="加载会话：${escapeHtml(item.title)}">${escapeHtml(item.title)}<small>${escapeHtml(chatSessionDate(item.updated_at))}</small></div>`).join('') : '<div class="history-row"><small>暂无历史会话</small></div>')}</div></aside>
       </section>`;
   }
 
@@ -563,12 +604,9 @@
   function imageView() {
     const currentImage = state.imageHistory.find(item => String(item.id) === String(state.activeImageTaskId)) || state.imageHistory[0];
     const hasResult = currentImage && ['succeeded', 'success'].includes(currentImage.status);
-    const imageModels = models.filter(item => item.modelType === 'image');
-    const activeImageModel = currentModel('image');
-    const imageModelOptions = imageModels.map(item => `<option value="${item.id}" ${String(state.selectedModelIds.image) === String(item.id) ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
     return `${pageHead('图像生成室', '选择模型并输入描述词，把灵感转成可用的视觉素材。')}
       <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-picture')}图像预览</h2></div><div class="preview-art ${hasResult ? 'demo-image' : ''}">${hasResult && currentImage.resultUrls && currentImage.resultUrls.length ? currentImage.resultUrls.map(url => `<img src="${escapeHtml(resultUrl(url))}" alt="${escapeHtml(currentImage.title)}" style="max-width:100%;max-height:420px;object-fit:contain" />`).join('') : `<div class="preview-art-inner">${icon(hasResult ? 'layui-icon-picture' : 'layui-icon-upload-drag')}<strong>${hasResult ? '图像生成完成' : currentImage ? '正在生成图像' : '等待生成图像'}</strong><span>${hasResult ? '服务端图像结果已返回。' : currentImage ? '新任务正在处理，完成后会替换当前预览。' : '提交提示词后，生成结果会在这里展示。'}</span></div>`}</div><div class="preview-caption">${hasResult && currentImage.resultUrls && currentImage.resultUrls.length ? `已返回 ${currentImage.resultUrls.length} 张图像，可右键保存。` : hasResult ? '任务完成，但服务端未返回图像地址。' : currentImage ? escapeHtml(currentImage.title) : '尚未提交任务'}</div></div>
-        <form class="panel panel-pad" id="image-form"><div class="inline-model"><span>${icon('layui-icon-light')} 图像模型 <small>${escapeHtml(activeImageModel ? activeImageModel.name : '未选择')}</small></span><select class="select-field" id="image-model-select" aria-label="选择图像模型" ${imageModels.length ? '' : 'disabled'}>${imageModelOptions || '<option>暂无图像模型</option>'}</select></div><div class="tab-row" role="group" aria-label="图像生成模式"><button type="button" class="tab-btn ${state.imageMode === '文生图' ? 'active' : ''}" data-image-mode="文生图" aria-pressed="${state.imageMode === '文生图'}">文生图</button><button type="button" class="tab-btn" disabled aria-disabled="true" title="文件字段确认后开放">图生图 · 待开放</button></div><div class="form-block"><label class="field-label" for="image-prompt">输入描述词 <span class="required">*</span></label><textarea class="textarea-field" id="image-prompt" required placeholder="例如：一只可爱的橘猫在阳光下睡觉，写实风格，8K 分辨率…"></textarea></div><div class="form-block"><span class="field-label" id="image-ratio-label">图像尺寸</span><div class="ratio-row" role="group" aria-labelledby="image-ratio-label">${['1:1 1024×1024', '9:16 720×1280', '16:9 1280×720'].map(item => `<button type="button" class="duration-btn ${state.imageRatio === item ? 'active' : ''}" data-ratio="${item}" aria-pressed="${state.imageRatio === item}">${item}</button>`).join('')}</div></div><div class="advanced"><div class="form-grid"><div><label class="field-label" for="image-count">生成数量</label><select class="select-field" id="image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></div><div><label class="field-label" for="image-negative">负面提示词</label><input id="image-negative" class="field" placeholder="模糊、低质量、变形…" /></div></div></div><button class="btn-primary wide-action" id="image-submit" type="submit" ${state.busy.image || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.image ? '正在提交…' : (window.PortalConfig.demoMode ? '立即生成' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '演示记录会保存在本机；提示词包含“#失败”可验证失败与重试。' : '真实图像接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
+        <form class="panel panel-pad" id="image-form"><div class="inline-model"><span>${icon('layui-icon-light')} qwen-image <small>文生图 / 图生图</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="图像生成模式"><button type="button" class="tab-btn ${state.imageMode === '文生图' ? 'active' : ''}" data-image-mode="文生图" aria-pressed="${state.imageMode === '文生图'}">文生图</button><button type="button" class="tab-btn" disabled aria-disabled="true" title="文件字段确认后开放">图生图 · 待开放</button></div><div class="form-block"><label class="field-label" for="image-prompt">输入描述词 <span class="required">*</span></label><textarea class="textarea-field" id="image-prompt" required placeholder="例如：一只可爱的橘猫在阳光下睡觉，写实风格，8K 分辨率…"></textarea></div><div class="form-block"><span class="field-label" id="image-ratio-label">图像尺寸</span><div class="ratio-row" role="group" aria-labelledby="image-ratio-label">${['1:1 1024×1024', '9:16 720×1280', '16:9 1280×720'].map(item => `<button type="button" class="duration-btn ${state.imageRatio === item ? 'active' : ''}" data-ratio="${item}" aria-pressed="${state.imageRatio === item}">${item}</button>`).join('')}</div></div><div class="advanced"><div class="form-grid"><div><label class="field-label" for="image-count">生成数量</label><select class="select-field" id="image-count"><option value="1">1 张</option><option value="2">2 张</option><option value="4">4 张</option></select></div><div><label class="field-label" for="image-negative">负面提示词</label><input id="image-negative" class="field" placeholder="模糊、低质量、变形…" /></div></div></div><button class="btn-primary wide-action" id="image-submit" type="submit" ${state.busy.image || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.image ? '正在提交…' : (window.PortalConfig.demoMode ? '立即生成' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '演示记录会保存在本机；提示词包含“#失败”可验证失败与重试。' : '真实图像接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}生成历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">提示词</th><th scope="col">类型</th><th scope="col">尺寸</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.imageHistory, '生成')}</tbody></table></div></section>`;
   }
 
@@ -578,15 +616,9 @@
     const complete = current && ['succeeded', 'success'].includes(current.status);
     const failed = current && current.status === 'failed';
     const voices = [['龙安洋', '阳光大男孩 · 中英双语'], ['龙安欢', '欢脱元气女 · 中英双语'], ['清雅老师', '知性女声 · 普通话'], ['星河少年', '沉稳男声 · 普通话']];
-    const audioModels = models.filter(item => item.modelType === 'audio' && item.available !== false);
-    const activeAudioModel = currentModel('audio');
-    const audioModelOptions = audioModels.map(item => `<option value="${item.id}" ${String(state.selectedModelIds.audio) === String(item.id) ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
-    const isAsr = state.audioMode === '语音识别';
-    const ttsControls = `<div class="form-block"><label class="field-label" for="audio-text">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" aria-describedby="audio-count" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count" aria-live="polite">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label" for="audio-speed">语速</label><input class="field" id="audio-speed" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label" for="audio-format">音频格式</label><select class="select-field" id="audio-format"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><span class="field-label" id="voice-label">选择配音员</span><div class="audio-voice-grid" role="group" aria-labelledby="voice-label">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}" aria-pressed="${state.selectedVoice === name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div>`;
-    const asrControls = `<div class="form-block"><label class="field-label" for="audio-file">上传音频文件 <span class="required">*</span></label><input class="field" id="audio-file" type="file" accept="audio/mpeg,audio/wav,audio/x-m4a,audio/mp4" /><p class="state-note" id="audio-file-status">支持 mp3 / wav / m4a，不超过 10MB。</p></div>`;
     return `${pageHead('声音创作坊', '将文字转成自然语音，并保留每一次创作的任务记录。')}
       <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-voice')}音频预览</h2></div><div class="preview-art" style="min-height:250px;background:linear-gradient(140deg,#182545,#283c77)"><div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-headset' : 'layui-icon-voice')}<strong>${failed ? '音频生成失败' : complete ? '音频已生成' : running ? '正在生成音频' : '未开始生成'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查后重试。') : complete ? '服务端音频结果已返回，可直接播放或下载。' : running ? '任务已提交，正在等待模型服务处理。' : '提交文本后可查看任务状态。'}</span></div></div><div class="preview-caption">${complete ? (current.resultUrls && current.resultUrls[0] ? `<audio controls preload="metadata" src="${escapeHtml(resultUrl(current.resultUrls[0]))}"></audio>` : '任务完成，但服务端未返回音频地址。') : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : running ? escapeHtml(current.title) : '声音任务通常以异步方式处理，请勿重复提交。'}</div></div>
-        <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} 语音模型 <small>${escapeHtml(activeAudioModel ? activeAudioModel.name : '未选择')}</small></span><select class="select-field" id="audio-model-select" aria-label="选择语音模型" ${audioModels.length ? '' : 'disabled'}>${audioModelOptions || '<option>暂无语音模型</option>'}</select></div><div class="tab-row" role="group" aria-label="声音创作模式">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" aria-pressed="${state.audioMode === item}" data-audio-mode="${item}">${item}</button>`).join('')}</div>${isAsr ? asrControls : ttsControls}<button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : (window.PortalConfig.demoMode ? '生成音频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '文本包含“#失败”可验证失败任务和重新提交。' : '真实声音接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
+        <form class="panel panel-pad" id="audio-form"><div class="inline-model"><span>${icon('layui-icon-light')} cosyvoice-v3-plus <small>¥1.2 / 万字符</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="tab-row" role="group" aria-label="声音创作模式">${['声音合成', '声音克隆', '语音识别', '长文本转音频'].map(item => `<button type="button" class="tab-btn ${state.audioMode === item ? 'active' : ''}" aria-pressed="${state.audioMode === item}" ${item === '声音合成' ? `data-audio-mode="${item}"` : 'disabled aria-disabled="true" title="接口字段确认后开放"'}>${item}${item === '声音合成' ? '' : ' · 待开放'}</button>`).join('')}</div><div class="form-block"><label class="field-label" for="audio-text">输入文本 <span class="required">*</span></label><textarea class="textarea-field" id="audio-text" aria-describedby="audio-count" maxlength="2000" required placeholder="输入您想转换成声音的文本内容…"></textarea><div class="state-note" style="margin-top:6px">${icon('layui-icon-note')} <span id="audio-count" aria-live="polite">0 / 2000 字符</span></div></div><div class="form-grid"><div><label class="field-label" for="audio-speed">语速</label><input class="field" id="audio-speed" type="number" step="0.1" min="0.5" max="2" value="1" /></div><div><label class="field-label" for="audio-format">音频格式</label><select class="select-field" id="audio-format"><option>MP3（默认）</option><option>WAV</option><option>PCM</option><option>OPUS</option></select></div></div><div class="form-block" style="margin-top:18px"><span class="field-label" id="voice-label">选择配音员</span><div class="audio-voice-grid" role="group" aria-labelledby="voice-label">${voices.map(([name, detail]) => `<button type="button" class="voice-card ${state.selectedVoice === name ? 'active' : ''}" data-voice="${name}" aria-pressed="${state.selectedVoice === name}"><strong>${name}</strong><span>${detail}</span></button>`).join('')}</div></div><button class="btn-primary wide-action" id="audio-submit" type="submit" ${state.busy.audio || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.audio ? '正在提交…' : (window.PortalConfig.demoMode ? '生成音频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '文本包含“#失败”可验证失败任务和重新提交。' : '真实声音接口尚未挂载，当前不会提交或生成本地假任务。'}</p></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">模式</th><th scope="col">时长/字数</th><th scope="col">完成时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.audioHistory, '创作')}</tbody></table></div></section>`;
   }
 
@@ -596,12 +628,9 @@
     const complete = current && ['succeeded', 'success'].includes(current.status);
     const failed = current && current.status === 'failed';
     const videoResults = complete && current && current.resultUrls ? current.resultUrls : [];
-    const videoModels = models.filter(item => item.modelType === 'video');
-    const activeVideoModel = currentModel('video');
-    const videoModelOptions = videoModels.map(item => `<option value="${item.id}" ${String(state.selectedModelIds.video) === String(item.id) ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
     return `${pageHead('视频合成站', '以文本、图片或音频条件组合成一段可控的短视频。')}
       <section class="studio-layout"><div class="panel preview-stage"><div class="panel-pad" style="padding-bottom:12px"><h2 class="section-title">${icon('layui-icon-video')}视频预览</h2></div><div class="video-preview">${videoResults.length ? videoResults.map((url, index) => `<figure style="margin:0 0 16px"><video controls preload="metadata" src="${escapeHtml(resultUrl(url))}" style="width:100%;max-height:420px"></video><figcaption class="preview-caption">结果 ${index + 1} · <a href="${escapeHtml(resultUrl(url))}" target="_blank" rel="noopener">在新窗口打开/下载</a></figcaption></figure>`).join('') : `<div class="preview-art-inner">${icon(failed ? 'layui-icon-error' : complete ? 'layui-icon-play' : 'layui-icon-video')}<strong>${failed ? '视频生成失败' : complete ? '视频生成完成' : running ? '正在渲染视频' : '视频预览区域'}</strong><span>${failed ? escapeHtml(current.error || '任务失败，请检查参数后重试。') : complete ? '服务端未返回可播放的视频地址。' : '生成完成后将在此显示结果。'}</span></div>`}</div><div class="preview-caption">${running ? '渲染过程可能需要 3–5 分钟，请耐心等待。' : complete ? `${escapeHtml(current.title)}${videoResults.length > 1 ? ` · 共 ${videoResults.length} 个结果` : ''}` : failed ? escapeHtml(current.error || '可在下方历史记录中重新提交。') : '无首帧时将采用文生视频模型。'}</div></div>
-        <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} 视频模型 <small>${escapeHtml(activeVideoModel ? activeVideoModel.name : '未选择')}</small></span><select class="select-field" id="video-model-select" aria-label="选择视频模型" ${videoModels.length ? '' : 'disabled'}>${videoModelOptions || '<option>暂无视频模型</option>'}</select></div><div class="form-block"><label class="field-label" for="video-prompt">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label" for="video-negative">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><span class="field-label" id="video-duration-label">视频时长</span><div class="duration-row" role="group" aria-labelledby="video-duration-label">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}" aria-pressed="${state.videoDuration === item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label" for="video-resolution">分辨率</label><select class="select-field" id="video-resolution"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><span class="field-label">音频设置</span><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : (window.PortalConfig.demoMode ? '文生视频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '提示词包含“#失败”可验证失败任务和重新提交。' : '真实视频接口尚未挂载，当前不会提交或生成本地假任务。'}</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
+        <form class="panel panel-pad" id="video-form"><div class="inline-model"><span>${icon('layui-icon-light')} wanx2.1-vace-plus <small>视频生成</small></span><button class="btn-quiet" type="button" data-route="models">更换模型</button></div><div class="form-block"><label class="field-label" for="video-prompt">视频描述提示词 <span class="required">*</span></label><textarea class="textarea-field" maxlength="500" id="video-prompt" required placeholder="描述您想要生成的视频内容…"></textarea></div><div class="form-block"><label class="field-label" for="video-negative">反向提示词（可选）</label><input class="field" id="video-negative" value="模糊、失真、低质量、变形、扭曲、水印、文字" /></div><div class="form-block"><span class="field-label" id="video-duration-label">视频时长</span><div class="duration-row" role="group" aria-labelledby="video-duration-label">${['5秒', '10秒', '15秒'].map(item => `<button type="button" class="duration-btn ${state.videoDuration === item ? 'active' : ''}" data-video-duration="${item}" aria-pressed="${state.videoDuration === item}">${item}</button>`).join('')}</div></div><div class="form-grid"><div><label class="field-label" for="video-resolution">分辨率</label><select class="select-field" id="video-resolution"><option>720P（高清）</option><option>1080P（超清）</option></select></div><div><span class="field-label">音频设置</span><button class="upload-drop" type="button" disabled aria-disabled="true" title="上传字段确认后开放">${icon('layui-icon-upload')} 音频上传 · 待开放</button></div></div><button class="btn-primary wide-action" id="video-submit" type="submit" ${state.busy.video || !window.PortalConfig.demoMode ? 'disabled' : ''}>${icon('layui-icon-release')} ${state.busy.video ? '正在提交…' : (window.PortalConfig.demoMode ? '文生视频' : '接口待接入')}</button><p class="state-note">${icon('layui-icon-tips')} ${window.PortalConfig.demoMode ? '提示词包含“#失败”可验证失败任务和重新提交。' : '真实视频接口尚未挂载，当前不会提交或生成本地假任务。'}</p><div class="tip-box"><strong>${icon('layui-icon-tips')} 温馨提示</strong>有首帧时可改用图生视频；尾帧可选，用于控制视频结束画面。长任务提交后请在创作历史中查看状态。</div></form></section>
       <section class="panel panel-pad history-panel"><h2 class="section-title">${icon('layui-icon-list')}创作历史</h2><div class="table-wrap" role="region" aria-label="创作记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">作品名称</th><th scope="col">合成模式</th><th scope="col">时长</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${historyRows(state.videoHistory, '创作')}</tbody></table></div></section>`;
   }
 
@@ -705,114 +734,311 @@
       ${form}
       <section class="panel panel-pad invoice-records-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-list')}开票记录</h2></div><div class="filters" role="group" aria-label="发票时间范围">${[['all', '全部'], ['year', '年'], ['month', '月'], ['day', '日'], ['custom', '自定义']].map(([value, label]) => `<button type="button" class="filter-btn ${state.invoice.period === value ? 'active' : ''}" data-invoice-period="${value}" aria-pressed="${state.invoice.period === value}">${label}</button>`).join('')}<label class="billing-month"><span class="sr-only">发票月份</span><input class="field" id="invoice-month" type="month" value="${escapeHtml(state.invoice.month)}" aria-label="发票月份" /></label></div></div><div class="table-wrap" role="region" aria-label="开票记录表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">申请时间</th><th scope="col">发票抬头</th><th scope="col">发票类型</th><th scope="col">发票金额</th><th scope="col">发票状态</th><th scope="col">驳回原因</th><th scope="col">备注/税号</th></tr></thead><tbody>${invoiceRows(pageRecords)}</tbody></table></div><div class="billing-pagination"><span>共 ${records.length} 条</span><div><button type="button" class="btn-quiet" data-invoice-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-invoice-page="1" ${nextDisabled}>下一页</button></div></div></section>`;
   }
-  function adminVendorIsBuiltin(vendor) {
-    return ['siliconflow', 'dashscope', 'ollama', 'mock'].includes(String(vendor || '').trim().toLowerCase());
+
+  // ===== 个人中心 · 用量统计 =====
+  function loadUsageData() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.usageStats) return;
+    if (state.usage.loaded || state.usage.loading) return;
+    state.usage.loading = true;
+    state.usage.error = '';
+    window.PortalApi.usageStats()
+      .then(data => { state.usage.stats = data && typeof data === 'object' ? data : null; state.usage.loaded = true; })
+      .catch(error => { state.usage.error = error && error.message ? error.message : '用量统计加载失败。'; state.usage.loaded = true; })
+      .finally(() => { state.usage.loading = false; render(); });
   }
-  function adminProviderTypeLabel(value) {
-    return value === 'local' ? '本地' : '云端';
+  function usageView() {
+    const demoMode = Boolean(window.PortalConfig.demoMode);
+    const s = state.usage.stats || {};
+    const call = Number(s.total_call) || 0;
+    const tokens = Number(s.total_tokens) || 0;
+    const cost = Number(s.total_cost) || 0;
+    const empty = state.usage.error
+      ? `<div class="notice usage-load-error">${icon('layui-icon-tips')}<div>用量统计加载失败：${escapeHtml(state.usage.error)}<br><small>请确认后端已注册并返回统一格式，稍后刷新重试。</small></div></div>`
+      : (call === 0 && tokens === 0 && cost === 0 ? (demoMode ? `<div class="notice" style="margin-bottom:16px">${icon('layui-icon-tips')}<div>当前处于演示模式，未连接用量统计接口；关闭演示模式后将展示账户的真实累计用量。</div></div>` : `<div class="empty-state usage-empty">${icon('layui-icon-chart')}<div>暂无用量记录<br><small>完成一次模型调用后，这里会汇总你的累计用量。</small></div></div>`) : '');
+    return `${pageHead('用量统计', '汇总你账户内全部模型调用的累计消耗。')}
+      <section class="usage-grid">
+        <article class="panel usage-card"><span class="usage-card-label">累计调用</span><strong class="usage-card-value">${escapeHtml(String(call))}</strong><span class="usage-card-unit">次</span><p class="usage-card-note">${icon('layui-icon-tips')} 成功完成的模型任务次数</p></article>
+        <article class="panel usage-card"><span class="usage-card-label">累计 Token</span><strong class="usage-card-value">${escapeHtml(String(tokens))}</strong><span class="usage-card-unit">tokens</span><p class="usage-card-note">${icon('layui-icon-tips')} 输入与输出 token 合计</p></article>
+        <article class="panel usage-card"><span class="usage-card-label">累计消费</span><strong class="usage-card-value">${escapeHtml(money(cost))}</strong><span class="usage-card-unit">元</span><p class="usage-card-note">${icon('layui-icon-tips')} 按成功消费累计</p></article>
+      </section>
+      ${empty}
+      <section class="panel panel-pad"><h2 class="section-title">${icon('layui-icon-tips')}说明</h2><p class="text-muted">用量口径：仅统计状态为“成功”的消费记录。累计消费按“分”保存并在此格式化显示。若累计 Token 恒为 0，说明当前后端未采集逐条 token 明细，属于接口数据缺口而非页面错误。</p></section>`;
   }
-  function adminModelTypeLabel(value) {
-    return { text: '文本', image: '图像', audio: '音频', video: '视频' }[value] || '其他';
+
+  // ===== 个人中心 · API Key 管理 =====
+  function apiKeyStatusLabel(status) { return status === 'disabled' ? ['已停用', 'pending'] : ['已启用', 'success']; }
+  function loadApiKeysData() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.apiKeys) return;
+    if (state.apiKeys.loaded || state.apiKeys.loading) return;
+    state.apiKeys.loading = true;
+    state.apiKeys.error = '';
+    window.PortalApi.apiKeys()
+      .then(data => {
+        state.apiKeys.records = Array.isArray(data) ? data : [];
+        state.apiKeys.loaded = true;
+      })
+      .catch(error => { state.apiKeys.error = error && error.message ? error.message : 'API Key 列表加载失败。'; state.apiKeys.loaded = true; })
+      .finally(() => { state.apiKeys.loading = false; render(); });
   }
-  function adminModelsAccessDeniedView() {
-    return `${pageHead('模型管理', '配置模型供应商与可用模型。')}
-      <section class="panel panel-pad"><div class="notice">${icon('layui-icon-password')}<div>该页面仅管理员可访问，当前账号没有权限。</div></div></section>`;
+  function apiKeyCreatedPanel() {
+    const created = state.apiKeys.created;
+    if (!created || !created.key) return '';
+    return `<section class="panel panel-pad api-key-reveal">
+      <div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-key')}新的 API Key 已生成</h2><p class="text-muted">完整密钥仅展示这一次，请立即复制并妥善保存，关闭后无法再次查看。</p></div></div>
+      <div class="api-key-codebox">
+        <code class="api-key-code" id="api-key-reveal">${escapeHtml(created.name || '未命名')} · ${escapeHtml(created.key)}</code>
+        <button class="btn-secondary" id="api-key-copy" type="button">${icon('layui-icon-transfer')} 复制密钥</button>
+      </div>
+      <p class="state-note">${icon('layui-icon-tips')} 请勿将密钥发送给他人或提交到公开仓库，泄露后可在下方列表中停用。</p>
+    </section>`;
   }
-  function adminModelsRows(items) {
-    if (!items.length) return `<tr><td class="table-empty" colspan="8">暂无模型，点击右上角「新增模型」添加。</td></tr>`;
-    return items.map(item => {
-      const price = item.price_per_call == null || item.price_per_call === '' ? '免费' : `${escapeHtml(item.price_per_call)}/次`;
-      const statusStyle = item.status === 'disabled' ? 'failed' : 'success';
-      const statusText = item.status === 'disabled' ? '已停用' : item.status === 'enabled' ? '启用' : escapeHtml(item.status || '未知');
-      return `<tr>
-        <td>${escapeHtml(item.name || '—')}</td>
-        <td>${escapeHtml(item.model_code || '—')}</td>
-        <td>${escapeHtml(item.vendor || '—')}</td>
-        <td>${escapeHtml(adminProviderTypeLabel(item.provider_type))}</td>
-        <td>${escapeHtml(adminModelTypeLabel(item.model_type))}</td>
-        <td>${escapeHtml(price)}</td>
-        <td><span class="status-tag ${statusStyle}">${statusText}</span></td>
-        <td>
-          <button type="button" class="btn-quiet" data-admin-edit="${escapeHtml(item.id)}">编辑</button>
-          <button type="button" class="btn-quiet" data-admin-toggle="${escapeHtml(item.id)}">${item.status === 'disabled' ? '启用' : '停用'}</button>
-          <button type="button" class="btn-quiet" data-admin-delete="${escapeHtml(item.id)}">删除</button>
-        </td>
-      </tr>`;
+  function apiKeyRows() {
+    if (state.apiKeys.error) return `<tr><td colspan="6"><div class="empty-state">${icon('layui-icon-tips')}<div>加载失败：${escapeHtml(state.apiKeys.error)}</div></div></td></tr>`;
+    if (!state.apiKeys.records.length) return `<tr><td colspan="6"><div class="empty-state">${icon('layui-icon-key')}<div>暂无 API Key<br><small>点击右上角“创建 Key”生成一个用于开放接口调用的密钥。</small></div></div></td></tr>`;
+    return state.apiKeys.records.map(key => {
+      const [label, style] = apiKeyStatusLabel(key.status);
+      const busy = String(state.apiKeys.busyId) === String(key.id);
+      const masked = key.key_prefix ? `${escapeHtml(key.key_prefix)}${'•'.repeat(24)}` : '—';
+      const toggle = key.status === 'disabled'
+        ? `<button class="btn-secondary" type="button" data-key-toggle="${escapeHtml(key.id)}" data-key-next="enabled" ${busy ? 'disabled' : ''}>${busy ? '处理中…' : '启用'}</button>`
+        : `<button class="btn-quiet danger" type="button" data-key-toggle="${escapeHtml(key.id)}" data-key-next="disabled" ${busy ? 'disabled' : ''}>${busy ? '处理中…' : '停用'}</button>`;
+      return `<tr><td><strong>${escapeHtml(key.name || '未命名')}</strong></td><td><code class="api-key-mask">${masked}</code></td><td><span class="status-tag ${style}">${label}</span></td><td>${escapeHtml(String(key.use_count || 0))}</td><td>${escapeHtml(dateText(key.created_at))}</td><td>${toggle}</td></tr>`;
     }).join('');
   }
-  function adminModelsFormTemplate() {
-    const editing = state.adminModels.editingId != null;
-    const current = editing ? state.adminModels.items.find(item => String(item.id) === String(state.adminModels.editingId)) : null;
-    const name = current ? current.name : '';
-    const modelCode = current ? current.model_code : '';
-    const providerType = current ? current.provider_type : 'online';
-    const modelType = current ? current.model_type : 'text';
-    const vendor = current ? current.vendor : '';
-    const endpoint = current ? current.endpoint : '';
-    const price = current ? current.price_per_call : '';
-    const description = current ? current.description : '';
-    const capabilityTags = Array.isArray(current && current.capability_tags) ? current.capability_tags.join(',') : (current && current.capability_tags ? String(current.capability_tags) : '');
-    const fetchSelect = state.adminModels.fetchModels.length
-      ? `<select class="select-field" id="admin-fetch-select" aria-label="获取到的模型"><option value="">— 选择模型 —</option>${state.adminModels.fetchModels.map(m => `<option value="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}（${escapeHtml(m.id)}）</option>`).join('')}</select>`
-      : '';
-    return `<form id="admin-model-form">
-      <div class="form-grid">
-        <div class="form-block"><label class="field-label" for="admin-name">展示名 <span class="required">*</span></label><input class="field" id="admin-name" maxlength="60" required value="${escapeHtml(name)}" placeholder="例如 Qwen-Plus" /></div>
-        <div class="form-block"><label class="field-label" for="admin-model-code">model_code <span class="required">*</span></label><input class="field" id="admin-model-code" maxlength="120" required value="${escapeHtml(modelCode)}" placeholder="例如 qwen-plus" /></div>
-      </div>
-      <div class="form-grid">
-        <div class="form-block"><label class="field-label" for="admin-provider-type">供应商类型</label><select class="select-field" id="admin-provider-type"><option value="online" ${providerType === 'online' ? 'selected' : ''}>online（云端）</option><option value="local" ${providerType === 'local' ? 'selected' : ''}>local（本地）</option></select></div>
-        <div class="form-block"><label class="field-label" for="admin-model-type">模型类型</label><select class="select-field" id="admin-model-type"><option value="text" ${modelType === 'text' ? 'selected' : ''}>文本（text）</option><option value="image" ${modelType === 'image' ? 'selected' : ''}>图像（image）</option><option value="audio" ${modelType === 'audio' ? 'selected' : ''}>音频（audio）</option><option value="video" ${modelType === 'video' ? 'selected' : ''}>视频（video）</option></select></div>
-      </div>
-      <div class="form-block"><label class="field-label" for="admin-vendor">供应商 vendor <span class="required">*</span></label><input class="field" id="admin-vendor" maxlength="60" required value="${escapeHtml(vendor)}" placeholder="内置 siliconflow / dashscope / ollama / mock，或自定义供应商名" /></div>
-      <div class="form-block"><label class="field-label" for="admin-endpoint">base_url（endpoint）</label><input class="field" id="admin-endpoint" value="${escapeHtml(endpoint)}" placeholder="自定义供应商时建议填写，例如 http://127.0.0.1:11434/v1" /><p class="state-note" id="admin-endpoint-hint">${icon('layui-icon-tips')} 内置供应商可留空走默认地址；自定义供应商建议填写 base_url。</p></div>
-      <div class="form-block"><label class="field-label" for="admin-api-key">api_key(自定义供应商用)</label><input class="field" id="admin-api-key" type="password" autocomplete="off" placeholder="${current && current.api_key ? '已配置（留空表示不修改）' : '自定义供应商填写密钥'}" /></div>
-      <div class="form-grid">
-        <div class="form-block"><label class="field-label" for="admin-price">price_per_call（单价）</label><input class="field" id="admin-price" type="number" min="0" step="0.0001" value="${escapeHtml(price)}" placeholder="留空或 0 表示免费" /></div>
-        <div class="form-block"><label class="field-label" for="admin-max-duration">max_duration_sec(选填,秒)</label><input class="field" id="admin-max-duration" type="number" min="0" step="1" value="${escapeHtml(current && current.max_duration_sec != null ? current.max_duration_sec : '')}" placeholder="可选" /></div>
-      </div>
-      <div class="form-block"><label class="field-label" for="admin-description">描述</label><textarea class="textarea-field" id="admin-description" maxlength="500" placeholder="简要说明该模型用途">${escapeHtml(description)}</textarea></div>
-      <div class="form-block"><label class="field-label" for="admin-capability-tags">能力标签（逗号分隔）</label><input class="field" id="admin-capability-tags" maxlength="300" value="${escapeHtml(capabilityTags)}" placeholder="例如 文本生成,深度思考" /></div>
-      <div class="form-block">
-        <span class="field-label">获取可用模型</span>
-        <p class="state-note">${icon('layui-icon-tips')} 输入 base_url 与 api_key 后点击「获取可用模型」，从供应商 OpenAI 兼容接口拉取模型列表。</p>
-        <div class="admin-fetch-row">
-          <input class="field" id="admin-fetch-endpoint" value="${escapeHtml(endpoint)}" placeholder="base_url，例如 http://127.0.0.1:11434/v1" />
-          <input class="field" id="admin-fetch-api-key" type="password" autocomplete="off" placeholder="api_key（可空）" />
-          <button type="button" class="btn-secondary" id="admin-fetch-models" ${state.adminModels.fetchBusy ? 'disabled' : ''}>${state.adminModels.fetchBusy ? '拉取中…' : '获取可用模型'}</button>
-        </div>
-        ${fetchSelect}
-      </div>
-      <div class="invoice-form-actions">
-        <button class="btn-quiet" id="admin-form-cancel" type="button">取消</button>
-        <button class="btn-primary" id="admin-form-submit" type="submit" ${state.adminModels.formBusy ? 'disabled' : ''}>${state.adminModels.formBusy ? '提交中…' : (editing ? '保存修改' : '新增模型')}</button>
-      </div>
-    </form>`;
+  function apiKeysView() {
+    const demoMode = Boolean(window.PortalConfig.demoMode);
+    const createDisabled = demoMode ? 'disabled aria-disabled="true" title="演示模式未连接 API Key 接口"' : '';
+    const createHint = demoMode ? `<div class="notice" style="margin-bottom:16px">${icon('layui-icon-tips')}<div>当前处于演示模式，未连接 API Key 接口，因此仅展示页面结构与既有列表；关闭演示模式后可创建与管理密钥。</div></div>` : '';
+    const formOpen = state.apiKeys.createOpen && !demoMode;
+    const createForm = formOpen ? `<section class="panel panel-pad api-key-create-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-add-1')}创建 API Key</h2><p class="text-muted">为你的密钥取一个便于识别的名称，创建后仅展示一次完整密钥。</p></div><button class="btn-quiet" id="api-key-create-cancel" type="button">取消</button></div><form id="api-key-create-form"><div class="form-block"><label class="field-label" for="api-key-name">密钥名称<span class="required">*</span></label><input class="field" id="api-key-name" maxlength="100" required autocomplete="off" placeholder="例如：本地联调、测试环境" /></div><div class="form-actions-row"><button class="btn-quiet" id="api-key-create-cancel-bottom" type="button">取消</button><button class="btn-primary" id="api-key-create-submit" type="submit" ${state.apiKeys.createBusy ? 'disabled' : ''}>${state.apiKeys.createBusy ? '正在生成…' : '生成 Key'}</button></div></form></section>` : '';
+    const action = `<button class="btn-primary" id="api-key-create-open" type="button" ${createDisabled}>${icon('layui-icon-add-1')} 创建 Key</button>`;
+    return `${pageHead('API Key 管理', '管理用于开放接口访问的密钥。', action)}
+      ${state.apiKeys.created && !demoMode ? apiKeyCreatedPanel() : ''}
+      ${createHint}
+      ${createForm}
+      <section class="panel panel-pad"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-key')}我的密钥</h2><p class="text-muted">密钥前缀用于识别；为安全起见完整密钥不会在此列表中展示。</p></div></div><div class="table-wrap" role="region" aria-label="API Key 列表表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">名称</th><th scope="col">密钥</th><th scope="col">状态</th><th scope="col">调用次数</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody>${apiKeyRows()}</tbody></table></div><div class="notice" style="margin-top:16px">${icon('layui-icon-tips')}<div>本页展示的密钥仅用于“调用统计”类接口的开放访问能力；Key 一旦泄露可在列表中直接停用，停用后该 Key 将无法继续使用。</div></div></section>`;
   }
+
+  // ===== 管理后台：状态文案辅助 =====
+  function adminUserStatusLabel(status) { return Number(status) === -1 ? ['已删除', 'pending'] : (Number(status) === 1 ? ['已启用', 'success'] : ['已禁用', 'pending']); }
+  function adminRoleLabel(role) { return role === 'admin' ? '管理员' : '普通用户'; }
+  function adminModelTypeLabel(type) { return { text: '文本', image: '图像', audio: '音频', video: '视频' }[type] || type; }
+  function adminModelStatusLabel(status) { return status === 'enabled' ? ['已启用', 'success'] : ['已停用', 'pending']; }
+  function adminPayLabel(method) { return { alipay: '支付宝', wxpay: '微信', bank: '网银', mock: '模拟' }[method] || method; }
+  function adminStatusZh(status) {
+    const map = { pending: '待处理', paid: '已支付', failed: '失败', cancelled: '已取消', success: '成功', refunded: '已退款', issued: '已开票', rejected: '已驳回', enabled: '启用', disabled: '停用' };
+    return map[status] || status;
+  }
+  function adminStatusTag(status) {
+    const tone = ['failed', 'cancelled', 'rejected', 'disabled'].includes(status) ? 'pending' : 'success';
+    return `<span class="status-tag ${tone}">${icon('layui-icon-vercode')} ${escapeHtml(adminStatusZh(status))}</span>`;
+  }
+  function adminPager(section, total, page, pageSize) {
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, pageCount);
+    const prev = safePage <= 1 ? 'disabled aria-disabled="true"' : '';
+    const next = safePage >= pageCount ? 'disabled aria-disabled="true"' : '';
+    return `<div class="billing-pagination"><span>共 ${total} 条</span><div><button type="button" class="btn-quiet" data-admin-page="-1" data-admin-section="${section}" ${prev}>上一页</button><span>第 ${safePage} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-admin-page="1" data-admin-section="${section}" ${next}>下一页</button></div></div>`;
+  }
+  function adminEmpty(rowCount, colSpan) {
+    return rowCount ? '' : `<tr><td colspan="${colSpan}"><div class="empty-state">${icon('layui-icon-file')}<div>暂无数据</div></div></td></tr>`;
+  }
+
+  // ===== 管理后台：统计概览 =====
+  function adminOverviewView() {
+    const o = state.admin.overview || {};
+    const cards = [
+      ['累计调用', o.total_call, 'layui-icon-release', '次'],
+      ['累计消费', money(o.total_cost), 'layui-icon-rmb', '人民币'],
+      ['注册用户', o.total_users, 'layui-icon-friends', '人'],
+      ['Token 总量', o.total_tokens, 'layui-icon-note', 'tok']
+    ].map(([title, value, ic, unit]) => `<article class="panel billing-card"><div class="billing-card-head"><span>${title}</span></div><strong class="billing-amount">${escapeHtml(value == null ? '—' : value)}</strong><span class="billing-unit">${unit}</span></article>`).join('');
+    return `<section class="billing-summary">${cards}</section>
+      <section class="panel panel-pad"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-set')}管理后台</h2><p class="text-muted">从顶部标签切换到用户、模型、钱包、订单、消费与发票审核。</p></div></div><div class="empty-state">${icon('layui-icon-template-1')}<div>选择上方标签开始管理<br><small>概览统计口径与后端 /api/admin/stats/usage 一致。</small></div></div></section>`;
+  }
+
+  // ===== 管理后台：用户管理 =====
+  function adminUsersView() {
+    const u = state.admin.users;
+    const rows = (u.records || []).map(item => {
+      const id = Number(item.id);
+      const st = adminUserStatusLabel(item.status);
+      const isDel = Number(item.status) === -1;
+      const disabled = id === u.busyId;
+      const auth = Number(item.real_auth_status);
+      const authTag = auth === 1 ? '<span class="status-tag success">已认证</span>' : (auth === 2 ? '<span class="status-tag pending">审核中</span>' : '<span class="status-tag pending">未认证</span>');
+      const toggle = Number(item.status) === 1 ? 0 : 1;
+      const tLabel = isDel ? '—' : (Number(item.status) === 1 ? '禁用' : '启用');
+      const tBtn = isDel ? '' : `<button class="btn-quiet" type="button" data-admin-user-toggle="${id}" data-admin-user-next="${toggle}" ${disabled ? 'disabled aria-disabled="true"' : ''}>${disabled ? '处理中…' : tLabel}</button>`;
+      return `<tr data-deleted="${isDel ? '1' : '0'}"><td><strong>${escapeHtml(item.username)}</strong><br><small class="text-muted">#${id}${escapeHtml(item.nickname ? ' · ' + item.nickname : '')}</small></td><td>${adminRoleLabel(item.role)}</td><td><span class="status-tag ${st[1]}">${icon('layui-icon-vercode')} ${st[0]}</span></td><td>${authTag}</td><td>${escapeHtml(money(item.balance))}</td><td>${escapeHtml(money(item.total_consumed))}</td><td>${escapeHtml(item.school || '—')}</td><td>${escapeHtml(item.phone || '—')}</td><td>${escapeHtml(dateText(item.created_at))}</td><td>${isDel ? '<span class="text-muted">已删除</span>' : `<button class="btn-quiet" type="button" data-admin-user-edit="${id}" data-admin-user-username="${escapeHtml(item.username)}">编辑</button> ${tBtn} <button class="btn-quiet danger" type="button" data-admin-user-del="${id}" data-admin-user-username="${escapeHtml(item.username)}">删除</button>`}</td></tr>`;
+    }).join('');
+    const form = u.formOpen ? adminUserForm(u.editing) : '';
+    return `<div class="billing-section-head" style="margin-bottom:14px"><div><h2 class="section-title">${icon('layui-icon-set')}用户管理</h2><p class="text-muted">查询 / 编辑 / 禁用 / 软删除 / 余额调整 / 重置密码。删除为软删(status=-1),可点右上刷新只显示在用用户。</p></div></div>
+      ${form}
+      <div class="billing-toolbar"><div class="filters"><input class="field search-field" id="admin-user-search" value="${escapeHtml(u.keyword || '')}" placeholder="搜索用户名/学校…" aria-label="搜索用户名" /></div>
+      <select class="select-field" id="admin-user-role" aria-label="角色筛选"><option value="">全部角色</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>管理员</option><option value="user" ${u.role === 'user' ? 'selected' : ''}>普通用户</option></select>
+      <select class="select-field" id="admin-user-status" aria-label="状态筛选"><option value="">全部状态</option><option value="1" ${u.status === '1' ? 'selected' : ''}>已启用</option><option value="0" ${u.status === '0' ? 'selected' : ''}>已禁用</option><option value="-1" ${u.status === '-1' ? 'selected' : ''}>已删除</option></select>
+      <button class="btn-secondary" id="admin-user-search-btn" type="button">${icon('layui-icon-search')} 搜索</button>
+      <button class="btn-quiet" id="admin-user-reset-btn" type="button">${icon('layui-icon-refresh')} 重置</button></div>
+      <div class="table-wrap" role="region" aria-label="用户管理表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">用户名</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">实名</th><th scope="col">余额</th><th scope="col">累计消费</th><th scope="col">学校</th><th scope="col">手机号</th><th scope="col">注册时间</th><th scope="col">操作</th></tr></thead><tbody>${adminEmpty(u.records.length, 10)}${rows}</tbody></table></div>${adminPager('users', u.total, u.page, u.pageSize)}`;
+  }
+  function adminUserForm(editing) {
+    const e = editing || {};
+    const roleOpts = [['user', '普通用户'], ['admin', '管理员']];
+    const authOpts = [['0', '未认证'], ['1', '已认证'], ['2', '审核中']];
+    return `<section class="panel panel-pad invoice-form-panel" style="margin-bottom:16px"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}${e.id ? '编辑用户 #' + e.id + ' · ' + escapeHtml(e.username || '') : '新建用户'}</h2></div></div><form id="admin-user-form" data-user-id="${e.id || ''}"><div class="form-grid">
+      <div class="form-block"><label class="field-label" for="au-role">角色</label><select class="select-field" id="au-role">${roleOpts.map(([v, l]) => `<option value="${v}" ${e.role === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="form-block"><label class="field-label" for="au-auth">实名认证</label><select class="select-field" id="au-auth">${authOpts.map(([v, l]) => `<option value="${v}" ${String(e.real_auth_status) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="form-block"><label class="field-label" for="au-nickname">昵称</label><input class="field" id="au-nickname" maxlength="50" value="${escapeHtml(e.nickname || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="au-phone">手机号</label><input class="field" id="au-phone" maxlength="20" value="${escapeHtml(e.phone || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="au-email">邮箱</label><input class="field" id="au-email" maxlength="100" value="${escapeHtml(e.email || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="au-school">学校</label><input class="field" id="au-school" maxlength="100" value="${escapeHtml(e.school || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="au-balance">余额调整(分,负数为扣减)</label><input class="field" id="au-balance" type="number" step="1" placeholder="留空则不变" value="" /></div>
+      <div class="form-block"><label class="field-label" for="au-password">重置密码(留空则不改)</label><input class="field" id="au-password" type="password" autocomplete="new-password" maxlength="64" placeholder="至少8位" value="" /></div>
+      </div>
+      <div class="form-block"><p class="text-muted">当前余额：${escapeHtml(money(e.balance))} ｜ 累计消费：${escapeHtml(money(e.total_consumed))}</p></div>
+      <div class="invoice-form-actions"><button class="btn-quiet" id="admin-user-form-cancel" type="button">取消</button><button class="btn-primary" id="admin-user-form-submit" type="submit" ${state.admin.users.busy ? 'disabled' : ''}>${state.admin.users.busy ? '正在保存…' : '保存'}</button></div></form></section>`;
+  }
+
+  // ===== 管理后台：模型管理 =====
   function adminModelsView() {
-    const admin = state.adminModels;
-    const items = admin.items || [];
-    const pageCount = Math.max(1, Math.ceil((Number(admin.total) || items.length) / admin.pageSize));
-    const page = Math.min(admin.page, pageCount);
-    if (admin.page !== page) admin.page = page;
-    const previousDisabled = page <= 1 ? 'disabled aria-disabled="true"' : '';
-    const nextDisabled = page >= pageCount ? 'disabled aria-disabled="true"' : '';
-    const action = `<button class="btn-primary" id="admin-model-open" type="button">${icon('layui-icon-add-1')} 新增模型</button>`;
-    const form = admin.formOpen ? `<section class="panel panel-pad invoice-form-panel"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}${admin.editingId != null ? '编辑模型' : '新增模型'}</h2><p class="text-muted">配置供应商、base_url 与密钥，保存后可在模型广场使用。</p></div></div>${adminModelsFormTemplate()}</section>` : '';
-    const body = admin.loading
-      ? `<tr><td class="table-empty" colspan="8">正在加载模型…</td></tr>`
-      : admin.error
-        ? `<tr><td class="table-empty" colspan="8">${escapeHtml(admin.error)} <button class="btn-quiet" id="admin-models-retry" type="button">重试</button></td></tr>`
-        : adminModelsRows(items);
-    return `${pageHead('模型管理', '自定义供应商、base_url、密钥并维护可用模型。', action)}
-      <section class="panel panel-pad">
-        <div class="notice">${icon('layui-icon-tips')}<div>此处管理后台模型配置，仅管理员可见。停用后模型将不再出现在模型广场。</div></div>
-        <div class="table-wrap" style="margin-top:18px" role="region" aria-label="模型管理表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">展示名</th><th scope="col">model_code</th><th scope="col">供应商</th><th scope="col">类型</th><th scope="col">模型类型</th><th scope="col">单价</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${body}</tbody></table></div>
-        <div class="billing-pagination"><span>共 ${admin.total || items.length} 条</span><div><button type="button" class="btn-quiet" data-admin-page="-1" ${previousDisabled}>上一页</button><span>第 ${page} / ${pageCount} 页</span><button type="button" class="btn-quiet" data-admin-page="1" ${nextDisabled}>下一页</button></div></div>
-      </section>${form}`;
+    const m = state.admin.models;
+    const rows = (m.records || []).map(item => {
+      const st = adminModelStatusLabel(item.status);
+      const disabled = item.id === m.busyId;
+      const toggle = item.status === 'enabled' ? 'disabled' : 'enabled';
+      const tLabel = item.status === 'enabled' ? '停用' : '启用';
+      const tags = Array.isArray(item.capability_tags) && item.capability_tags.length ? item.capability_tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('') : '';
+      return `<tr><td><strong>${escapeHtml(item.name)}</strong><br><small class="text-muted">${escapeHtml(item.model_code)}</small></td><td>${adminModelTypeLabel(item.model_type)}</td><td>${escapeHtml(item.provider_type)} / ${escapeHtml(item.vendor)}</td><td>${Number.isFinite(Number(item.price_per_call)) ? escapeHtml(money(item.price_per_call)) : '—'}</td><td><span class="status-tag ${st[1]}">${icon('layui-icon-vercode')} ${st[0]}</span></td><td>${tags || '—'}</td><td><button class="btn-quiet" type="button" data-admin-model-edit="${item.id}" data-admin-model-name="${escapeHtml(item.name)}">编辑</button> <button class="btn-quiet" type="button" data-admin-model-status="${item.id}" data-admin-model-next="${toggle}" ${disabled ? 'disabled aria-disabled="true"' : ''}>${disabled ? '处理中…' : tLabel}</button> <button class="btn-quiet" type="button" data-admin-model-del="${item.id}" data-admin-model-name="${escapeHtml(item.name)}">删除</button></td></tr>`;
+    }).join('');
+    const form = m.formOpen ? adminModelForm(m.editing) : '';
+    const openLabel = m.formOpen ? '收起表单' : (m.editing ? '继续编辑' : '新建模型');
+    return `<div class="billing-section-head" style="margin-bottom:14px"><div><h2 class="section-title">${icon('layui-icon-set')}模型管理</h2><p class="text-muted">创建 / 编辑 / 启停 / 删除门户模型，列表含停用项。</p></div><button class="btn-primary" id="admin-model-toggle-form" type="button">${icon('layui-icon-add-1')} ${openLabel}</button></div>
+      ${form}
+      <div class="billing-toolbar"><div class="filters"><input class="field search-field" id="admin-model-search" value="${escapeHtml(m.keyword || '')}" placeholder="搜索模型名/描述…" aria-label="搜索模型" /></div><button class="btn-secondary" id="admin-model-search-btn" type="button">${icon('layui-icon-search')} 搜索</button></div>
+      <div class="table-wrap" role="region" aria-label="模型管理表格" tabindex="0"><table class="data-table"><thead><tr><th scope="col">模型</th><th scope="col">类型</th><th scope="col">来源</th><th scope="col">单价</th><th scope="col">状态</th><th scope="col">能力标签</th><th scope="col">操作</th></tr></thead><tbody>${adminEmpty(m.records.length, 7)}${rows}</tbody></table></div>${adminPager('models', m.total, m.page, m.pageSize)}`;
   }
+  function adminModelForm(editing) {
+    const e = editing || {};
+    const vt = ['text', 'image', 'audio', 'video'];
+    const vp = ['online', 'local'];
+    return `<section class="panel panel-pad invoice-form-panel" style="margin-bottom:16px"><div class="billing-section-head"><div><h2 class="section-title">${icon('layui-icon-edit')}${editing ? '编辑模型 #' + e.id : '新建模型'}</h2></div></div><form id="admin-model-form" data-model-id="${e.id || ''}"><div class="form-grid">
+      <div class="form-block"><label class="field-label" for="am-name">名称<span class="required">*</span></label><input class="field" id="am-name" maxlength="100" required value="${escapeHtml(e.name || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="am-code">厂商调用名(model_code)<span class="required">*</span></label><input class="field" id="am-code" maxlength="200" required value="${escapeHtml(e.model_code || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="am-type">类型<span class="required">*</span></label><select class="select-field" id="am-type">${vt.map(t => `<option value="${t}" ${e.model_type === t ? 'selected' : ''}>${adminModelTypeLabel(t)}</option>`).join('')}</select></div>
+      <div class="form-block"><label class="field-label" for="am-provider">来源(provider)<span class="required">*</span></label><select class="select-field" id="am-provider">${vp.map(p => `<option value="${p}" ${e.provider_type === p ? 'selected' : ''}>${p === 'online' ? '云端' : '本地'}</option>`).join('')}</select></div>
+      <div class="form-block"><label class="field-label" for="am-vendor">厂商(vendor)<span class="required">*</span></label><input class="field" id="am-vendor" maxlength="30" required value="${escapeHtml(e.vendor || '')}" placeholder="内置 siliconflow / dashscope / ollama / mock，或自定义供应商名" /></div>
+      <div class="form-block"><label class="field-label" for="am-endpoint">base_url(endpoint)</label><input class="field" id="am-endpoint" maxlength="255" placeholder="自定义供应商填写，如 http://127.0.0.1:11434/v1" value="${escapeHtml(e.endpoint || '')}" /></div>
+      <div class="form-block"><label class="field-label" for="am-api-key">api_key(自定义供应商用)</label><input class="field" id="am-api-key" type="password" autocomplete="off" placeholder="${e.api_key ? '已配置（留空表示不修改）' : '自定义供应商填写密钥'}" /></div>
+      <div class="form-block"><label class="field-label" for="am-price">单价(积分点/次)<span class="required">*</span></label><input class="field" id="am-price" type="number" min="0" step="1" required value="${e.price_per_call == null ? 0 : e.price_per_call}" /></div>
+      <div class="form-block"><label class="field-label" for="am-duration">音视频时长上限(秒)</label><input class="field" id="am-duration" type="number" min="0" step="1" value="${e.max_duration_sec == null ? '' : e.max_duration_sec}" /></div>
+      <div class="form-block"><label class="field-label">获取可用模型</label><div class="admin-fetch-row"><input class="field" id="am-fetch-endpoint" placeholder="base_url" value="${escapeHtml(e.endpoint || '')}" /><input class="field" id="am-fetch-key" type="password" autocomplete="off" placeholder="api_key" /><button class="btn-secondary" type="button" id="am-fetch-models">获取</button></div><select class="select-field" id="am-fetch-select" style="margin-top:6px"><option value="">— 选择获取到的模型 —</option></select></div>
+      </div>
+      <div class="form-block"><label class="field-label" for="am-desc">说明</label><textarea class="textarea-field" id="am-desc" maxlength="500" rows="2">${escapeHtml(e.description || '')}</textarea></div>
+      <div class="form-block"><label class="field-label" for="am-tags">能力标签(逗号分隔)</label><input class="field" id="am-tags" placeholder="如 对话,推理" value="${escapeHtml((e.capability_tags || []).join(','))}" /></div>
+      <div class="invoice-form-actions"><button class="btn-quiet" id="admin-model-form-cancel" type="button">取消</button><button class="btn-primary" id="admin-model-form-submit" type="submit" ${mBusy('models') ? 'disabled' : ''}>${mBusy('models') ? '正在保存…' : '保存'}</button></div></form></section>`;
+  }
+
+  // ===== 管理后台：钱包 / 订单 / 消费 / 发票 =====
+  function adminWalletsView() {
+    const w = state.admin.wallets;
+    const rows = (w.records || []).map(item => `<tr><td>${escapeHtml(item.username)}</td><td>#${item.user_id}</td><td>${escapeHtml(money(item.balance))}</td><td>${escapeHtml(money(item.total_recharged))}</td><td>${escapeHtml(money(item.total_consumed))}</td><td>${escapeHtml(dateText(item.created_at))}</td></tr>`).join('');
+    return `<div class="billing-toolbar"><div class="filters"><input class="field search-field" id="admin-wallet-search" value="${escapeHtml(w.keyword || '')}" placeholder="搜索用户名…" aria-label="搜索用户名" /></div><button class="btn-secondary" id="admin-wallet-search-btn" type="button">${icon('layui-icon-search')} 搜索</button></div>
+      <div class="table-wrap" role="region" aria-label="钱包列表" tabindex="0"><table class="data-table"><thead><tr><th scope="col">用户名</th><th scope="col">用户ID</th><th scope="col">余额</th><th scope="col">累计充值</th><th scope="col">累计消费</th><th scope="col">创建时间</th></tr></thead><tbody>${adminEmpty(w.records.length, 6)}${rows}</tbody></table></div>${adminPager('wallets', w.total, w.page, w.pageSize)}`;
+  }
+  function adminOrdersView() {
+    const o = state.admin.orders;
+    const rows = (o.records || []).map(item => `<tr><td>${escapeHtml(item.order_no)}</td><td>#${item.user_id}</td><td>${escapeHtml(adminPayLabel(item.payment_method))}</td><td>${escapeHtml(money(item.amount))}</td><td>${item.points}</td><td>${adminStatusTag(item.status)}</td><td>${escapeHtml(item.external_trade_no || '—')}</td><td>${escapeHtml(dateText(item.created_at))}</td></tr>`).join('');
+    return `<div class="table-wrap" role="region" aria-label="充值订单" tabindex="0"><table class="data-table"><thead><tr><th scope="col">订单号</th><th scope="col">用户ID</th><th scope="col">支付方式</th><th scope="col">金额</th><th scope="col">到账积分</th><th scope="col">状态</th><th scope="col">外部流水号</th><th scope="col">创建时间</th></tr></thead><tbody>${adminEmpty(o.records.length, 8)}${rows}</tbody></table></div>${adminPager('orders', o.total, o.page, o.pageSize)}`;
+  }
+  function adminConsumptionsView() {
+    const c = state.admin.consumptions;
+    const rows = (c.records || []).map(item => `<tr><td>#${item.id}</td><td>#${item.user_id}</td><td>#${item.model_id}</td><td>${escapeHtml(money(item.amount))}</td><td>${adminStatusTag(item.status)}</td><td>${escapeHtml(dateText(item.created_at))}</td></tr>`).join('');
+    return `<div class="table-wrap" role="region" aria-label="消费记录" tabindex="0"><table class="data-table"><thead><tr><th scope="col">记录ID</th><th scope="col">用户ID</th><th scope="col">模型ID</th><th scope="col">金额</th><th scope="col">状态</th><th scope="col">创建时间</th></tr></thead><tbody>${adminEmpty(c.records.length, 6)}${rows}</tbody></table></div>${adminPager('consumptions', c.total, c.page, c.pageSize)}`;
+  }
+  function adminInvoicesView() {
+    const inv = state.admin.invoices;
+    const rows = (inv.records || []).map(item => {
+      const busy = item.id === inv.busyId;
+      const rejected = item.status === 'pending';
+      const actions = item.status === 'pending'
+        ? `<button class="btn-quiet" type="button" data-admin-invoice-review="${item.id}" data-admin-invoice-next="issued" ${busy ? 'disabled' : ''}>${busy ? '处理中…' : '通过'}</button> <button class="btn-quiet" type="button" data-admin-invoice-review="${item.id}" data-admin-invoice-next="rejected" ${busy ? 'disabled' : ''}>驳回</button>`
+        : adminStatusTag(item.status);
+      return `<tr><td>#${item.id}</td><td>#${item.user_id}</td><td>${escapeHtml(item.title)}</td><td>${item.type === 'enterprise' ? '企业' : '个人'}</td><td>${escapeHtml(money(item.amount))}</td><td>${actions}</td><td>${escapeHtml(item.tax_no || '—')}</td><td>${escapeHtml(dateText(item.created_at))}</td></tr>`;
+    }).join('');
+    return `<div class="table-wrap" role="region" aria-label="发票审核" tabindex="0"><table class="data-table"><thead><tr><th scope="col">发票ID</th><th scope="col">用户ID</th><th scope="col">抬头</th><th scope="col">类型</th><th scope="col">金额</th><th scope="col">状态</th><th scope="col">税号</th><th scope="col">申请时间</th></tr></thead><tbody>${adminEmpty(inv.records.length, 8)}${rows}</tbody></table></div>${adminPager('invoices', inv.total, inv.page, inv.pageSize)}`;
+  }
+
+  // ===== 管理后台：总视图 + 标签切换 =====
+  function adminView() {
+    if (user.role !== 'admin') return `<main class="auth-required"><section class="panel panel-pad"><span class="auth-icon">${icon('layui-icon-password')}</span><h1>无权限</h1><p>该页面仅限管理员访问。</p></section></main>`;
+    const tabs = [
+      ['overview', '概览', 'layui-icon-chart-screen'], ['users', '用户管理', 'layui-icon-friends'],
+      ['models', '模型管理', 'layui-icon-app'], ['wallets', '钱包', 'layui-icon-rmb'],
+      ['orders', '充值订单', 'layui-icon-list'], ['consumptions', '消费记录', 'layui-icon-note'],
+      ['invoices', '发票审核', 'layui-icon-file']
+    ];
+    const tabBar = `<div class="tab-row admin-tab-bar" role="tablist" aria-label="管理后台模块">${tabs.map(([id, label, ic]) => `<button type="button" class="tab-btn ${state.admin.tab === id ? 'active' : ''}" data-admin-tab="${id}" role="tab" aria-selected="${state.admin.tab === id}">${icon(ic)} ${label}</button>`).join('')}</div>`;
+    const body = ({ overview: adminOverviewView, users: adminUsersView, models: adminModelsView, wallets: adminWalletsView, orders: adminOrdersView, consumptions: adminConsumptionsView, invoices: adminInvoicesView }[state.admin.tab] || adminOverviewView)();
+    return `${pageHead('管理后台', '用户 / 模型 / 钱包与发票的集中管理。')}<section class="panel panel-pad">${tabBar}<div style="margin-top:20px">${body}</div></section>`;
+  }
+
+  // ===== 管理后台：数据加载 =====
+  function adminListKey(response) {
+    if (!response) return [];
+    const list = response.list;
+    return Array.isArray(list) ? list : (Array.isArray(response.items) ? response.items : []);
+  }
+  function mBusy() { return Boolean(state.admin.models.busy); }
+  function loadAdminOverview() {
+    if (state.admin.overview) return Promise.resolve();
+    return window.PortalApi.adminUsageStats().then(data => { state.admin.overview = data || {}; }).catch(() => { state.admin.overview = {}; });
+  }
+  function adminUserQuery() {
+    const q = {};
+    const kw = String(state.admin.users.keyword || '').trim();
+    if (kw) q.keyword = kw;
+    const role = String(state.admin.users.role || '');
+    if (role) q.role = role;
+    const status = String(state.admin.users.status || '');
+    if (status !== '') q.status = Number(status);
+    return q;
+  }
+  function adminFetch(section, params) {
+    state.admin.error = '';
+    state.admin.loading = true;
+    const base = Object.assign({ page: 1, page_size: 10 }, params);
+    const apiCalls = {
+      users: () => window.PortalApi.adminUsers(Object.assign({}, base, adminUserQuery(), { page: state.admin.users.page, page_size: state.admin.users.pageSize }, params)),
+      models: () => window.PortalApi.adminModels(Object.assign({}, base, { page: state.admin.models.page, page_size: state.admin.models.pageSize }, params)),
+      wallets: () => window.PortalApi.adminWallets(Object.assign({}, base, { page: state.admin.wallets.page, page_size: state.admin.wallets.pageSize }, params)),
+      orders: () => window.PortalApi.adminOrders({ page: state.admin.orders.page, page_size: state.admin.orders.pageSize }),
+      consumptions: () => window.PortalApi.adminConsumptions({ page: state.admin.consumptions.page, page_size: state.admin.consumptions.pageSize }),
+      invoices: () => window.PortalApi.adminInvoices({ page: state.admin.invoices.page, page_size: state.admin.invoices.pageSize })
+    };
+    const call = apiCalls[section];
+    if (!call) { state.admin.loading = false; return Promise.resolve(); }
+    return Promise.resolve(call()).then(data => {
+      const rec = state.admin[section];
+      rec.records = adminListKey(data);
+      rec.total = Number(data && data.total) || rec.records.length;
+      const maxPage = Math.max(1, Math.ceil(rec.total / rec.pageSize));
+      rec.page = Math.min(Number(data && data.page) || 1, maxPage);
+      rec.loaded = true;
+    }).catch(error => {
+      state.admin.error = error && error.message ? error.message : '数据加载失败。';
+      toast(state.admin.error, 'error');
+    }).finally(() => { state.admin.loading = false; });
+  }
+  function adminLoadActiveTab() {
+    if (user.role !== 'admin') return;
+    const tab = state.admin.tab;
+    if (tab === 'overview') return loadAdminOverview();
+    return adminFetch(tab);
+  }
+
   function viewFor(route) {
-    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView, billing: billingView, invoice: invoiceView, 'admin-models': adminModelsView };
+    const views = { home: homeView, models: modelsView, text: textView, image: imageView, audio: audioView, video: videoView, tasks: tasksView, profile: profileView, billing: billingView, invoice: invoiceView, usage: usageView, apikeys: apiKeysView, admin: adminView };
     return (views[route] || homeView)();
   }
   function loadBillingData() {
@@ -865,27 +1091,6 @@
       if (state.route === 'invoice') render();
     });
   }
-  function loadAdminModelsData() {
-    const admin = state.adminModels;
-    if (admin.loading || admin.loaded) return;
-    admin.loading = true;
-    admin.error = '';
-    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) {
-      admin.loaded = true;
-      admin.loading = false;
-      return;
-    }
-    window.PortalApi.request({ url: `/api/admin/models?page=${admin.page}&page_size=${admin.pageSize}` }).then(data => {
-      admin.items = Array.isArray(data && data.items) ? data.items : [];
-      admin.total = Number(data && data.total) || admin.items.length;
-    }).catch(error => {
-      admin.error = error && error.message ? error.message : '模型列表加载失败，请稍后重试。';
-    }).finally(() => {
-      admin.loading = false;
-      admin.loaded = true;
-      if (state.route === 'admin-models') render();
-    });
-  }
   function loadCurrentUser() {
     if (!window.PortalApi || window.PortalApi.config.demoMode) return Promise.resolve();
     const cached = window.PortalApi.currentUserSnapshot();
@@ -906,13 +1111,10 @@
     }
     if (state.route === 'billing') loadBillingData();
     if (state.route === 'invoice') loadInvoiceData();
-    if (state.route === 'admin-models' && user.role !== 'admin') {
-      $('#app').html(shell(state.route, adminModelsAccessDeniedView()));
-      bindEvents();
-      return;
-    }
-    if (state.route === 'admin-models') loadAdminModelsData();
+    if (state.route === 'usage') loadUsageData();
+    if (state.route === 'apikeys') loadApiKeysData();
     if (state.route === 'text') loadChatHistory();
+    if (state.route === 'admin' && user.role === 'admin') adminLoadActiveTab();
     $('#app').html(shell(state.route, viewFor(state.route)));
     bindEvents();
     if (state.route === 'text') $('#message-list').scrollTop($('#message-list')[0].scrollHeight);
@@ -946,6 +1148,85 @@
     if (/积分不足|余额不足/.test(detail)) return `${detail}请到「个人中心 - 我的钱包」充值后再试。`;
     return `文本任务请求失败：${detail}`;
   }
+  function activeChatWelcome() {
+    return [{ role: 'assistant', content: '你好！我是你的 AI 创意助手。你可以让我协助优化文案、解释知识点，或开始一次创作。' }];
+  }
+  function ensureChatConversation(modelName) {
+    const key = String(modelName || state.currentChatModel || 'default');
+    if (!state.chatByModel[key]) {
+      state.chatByModel[key] = { messages: [], history: [], sessionId: null };
+    }
+    return state.chatByModel[key];
+  }
+  // 将当前正在编辑的会话写回所属模型，保证切换后不丢上下文。
+  function snapshotCurrentChat() {
+    const conv = ensureChatConversation(state.currentChatModel);
+    conv.messages = state.chatMessages.slice(-100);
+    conv.history = state.chatHistory.slice(0, 100);
+    conv.sessionId = state.chatSessionId || null;
+  }
+  // 让工作副本（chatMessages/chatHistory/chatSessionId）与“当前模型”的会话保持一致。
+  function syncActiveChatToCurrentModel() {
+    const conv = ensureChatConversation(state.currentChatModel);
+    if (!Array.isArray(conv.messages) || !conv.messages.length) conv.messages = activeChatWelcome();
+    state.chatMessages = conv.messages;
+    state.chatHistory = Array.isArray(conv.history) ? conv.history : [];
+    state.chatSessionId = conv.sessionId || null;
+  }
+  // 真实模式：从服务端拉取当前用户的历史会话，填入侧栏；失败静默保留本地状态。
+  function loadChatHistory() {
+    if (window.PortalConfig.demoMode || !window.PortalApi || !window.PortalApi.token()) return;
+    if (chatHistoryLoaded) return;
+    chatHistoryLoaded = true;
+    window.PortalApi.listChatSessions({ page: 1, page_size: 100 }).then(data => {
+      const items = Array.isArray(data && data.items) ? data.items : [];
+      state.chatSessions = items.map(item => ({
+        session_id: item.session_id,
+        title: item.title || '新会话',
+        model_id: item.model_id,
+        updated_at: item.updated_at || item.created_at || ''
+      }));
+      if (state.route === 'text') render();
+    }).catch(() => { /* 历史会话加载失败不阻断页面 */ });
+  }
+  // 会话变化后强制重拉一次（新建会话成功后刷新侧栏）。
+  function refreshChatHistory() {
+    chatHistoryLoaded = false;
+    loadChatHistory();
+  }
+  // 真实模式：点击历史会话回读该会话的全部消息并切到对应模型。
+  function loadChatSession(sessionId) {
+    if (window.PortalConfig.demoMode || !window.PortalApi) return;
+    window.PortalApi.listSessionMessages(sessionId).then(data => {
+      const items = Array.isArray(data && data.items) ? data.items : [];
+      const lastModelId = items.length ? items[items.length - 1].model_id : null;
+      const model = lastModelId != null ? models.find(item => Number(item.id) === Number(lastModelId)) : null;
+      snapshotCurrentChat();
+      if (model && model.name !== state.currentChatModel) state.currentChatModel = model.name;
+      state.chatSessionId = sessionId;
+      state.chatMessages = items.length
+        ? items.map(item => ({ role: item.role, content: item.content }))
+        : activeChatWelcome();
+      const conv = ensureChatConversation(state.currentChatModel);
+      conv.sessionId = sessionId;
+      conv.messages = state.chatMessages.slice(-100);
+      render();
+    }).catch(error => toast(error && error.message ? error.message : '历史会话加载失败，请稍后重试。', 'error'));
+  }
+  // 切换到指定模型并加载其独立的会话；reset=true 时为当前模型另起新会话。
+  function activateChatFor(modelName, reset) {
+    if (modelName) {
+      snapshotCurrentChat(); // 先把上一个模型没写完的上下文归档
+      state.currentChatModel = String(modelName);
+    }
+    if (reset) {
+      const conv = ensureChatConversation(state.currentChatModel);
+      conv.messages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }];
+      conv.history = [];
+      conv.sessionId = null;
+    }
+    syncActiveChatToCurrentModel();
+  }
   function sendChat() {
     const input = $('#chat-input'); const prompt = input.val().trim();
     if (!prompt) return toast('请输入问题或指令后再发送。', 'error');
@@ -977,7 +1258,9 @@
       toast(streamFailureMessage(error), 'error');
     }).finally(() => {
       state.busy.text = false;
+      snapshotCurrentChat(); // 把本轮会话结果与会话id归档到当前模型
       persistDemoState();
+      refreshChatHistory(); // 真实模式下新会话已落库，刷新侧栏历史列表
       render();
     });
   }
@@ -1062,21 +1345,17 @@
         window.location.assign(loginUrl);
       });
     });
-    $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.modelType === 'text' || found.type === '语言模型' || found.type === '本地模型') { state.currentChatModel = model; state.chatSessionId = null; setRoute('text'); } else if (found.modelType === 'image' || found.type === '生图模型') { state.selectedModelIds.image = found.id; setRoute('image'); } else if (found.modelType === 'audio' || found.type === 'TTS模型') { state.selectedModelIds.audio = found.id; setRoute('audio'); } else if (found.modelType === 'video' || found.type === '生视频模型') { state.selectedModelIds.video = found.id; setRoute('video'); } else toast('该模型的应用入口正在准备中。'); });
+    $('[data-use-model]').on('click', function () { const model = $(this).data('use-model'); const found = models.find(item => item.name === model); if (!found) return; if (found.modelType === 'text' || found.type === '语言模型' || found.type === '本地模型') { activateChatFor(model); setRoute('text'); } else if (found.modelType === 'image' || found.type === '生图模型') { state.selectedModelIds.image = found.id; setRoute('image'); } else if (found.modelType === 'audio' || found.type === 'TTS模型') { state.selectedModelIds.audio = found.id; setRoute('audio'); } else if (found.modelType === 'video' || found.type === '生视频模型') { state.selectedModelIds.video = found.id; setRoute('video'); } else toast('该模型的应用入口正在准备中。'); });
     $('[data-source]').on('click', function () { state.modelSource = $(this).data('source'); render(); });
     $('[data-group]').on('click', function () { state.modelGroup = $(this).data('group'); render(); });
     $('[data-type]').on('click', function () { state.modelType = $(this).data('type'); render(); });
     $('#model-search').on('input', function () { state.keyword = $(this).val(); $('.models-grid').html(modelResultsHtml()); });
-    $('[data-chat-model]').on('click', function () { state.currentChatModel = $(this).data('chat-model'); state.chatSessionId = null; render(); });
-    $(document).off('click.chatHistory').on('click.chatHistory', '[data-chat-session]', function () {
-      const sid = Number($(this).data('chat-session'));
-      if (!sid || window.PortalConfig.demoMode) return;
-      state.chatSessionId = sid;
-      window.PortalApi.listSessionMessages(sid).then(data => {
-        const rows = Array.isArray(data && data.items) ? data.items : [];
-        state.chatMessages = rows.length ? rows.map(m => ({ role: m.role, content: m.content })) : [{ role: 'assistant', content: '该会话暂无消息。' }];
-        render();
-      }).catch(error => toast(error && error.message ? error.message : '历史消息加载失败。', 'error'));
+    $('[data-chat-model]').on('click', function () {
+      const next = String($(this).data('chat-model'));
+      if (next === state.currentChatModel) return;
+      if (state.busy.text) return toast('当前模型仍在生成中，请稍候再切换模型。', 'error');
+      activateChatFor(next);
+      render();
     });
     $('#send-chat').on('click', sendChat);
     $('#chat-input').on('keydown', event => {
@@ -1087,18 +1366,22 @@
       sendChat();
     });
     $('[data-prompt]').on('click', function () { $('#chat-input').val($(this).data('prompt')).focus(); });
-    $('#new-chat, #new-chat-side').on('click', () => { state.chatSessionId = null; state.chatMessages = [{ role: 'assistant', content: '已创建新会话。告诉我你想完成什么，我会从这里开始协助。' }]; persistDemoState(); render(); });
+    $('#new-chat, #new-chat-side').on('click', () => { activateChatFor(state.currentChatModel, true); persistDemoState(); render(); });
+    $('[data-chat-session]').on('click keydown', function (event) {
+      if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+      if (event.type === 'keydown') event.preventDefault();
+      if (state.busy.text) return toast('当前模型仍在生成中，请稍候再切换会话。', 'error');
+      const sessionId = $(this).data('chat-session');
+      if (sessionId != null) loadChatSession(sessionId);
+    });
     $('[data-image-mode]').on('click', function () { state.imageMode = $(this).data('image-mode'); render(); });
     $('[data-ratio]').on('click', function () { state.imageRatio = $(this).data('ratio'); render(); });
-    $('#image-model-select').on('change', function () { state.selectedModelIds.image = Number($(this).val()); render(); });
     $('#image-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#image-prompt').val().trim(); if (!prompt) return toast('请先填写图像描述词。', 'error'); if (state.busy.image) return; state.busy.image = true; const title = prompt.slice(0, 22) + (prompt.length > 22 ? '…' : ''); const model = currentModel('image'); const submit = window.PortalConfig.demoMode ? Promise.resolve(createRecord('image', { title, mode: state.imageMode, meta: state.imageRatio, shouldFail: shouldSimulateFailure(prompt) })) : (model ? window.PortalApi.task('image', { model_id: model.id, prompt, params: { image_size: state.imageRatio.split(' ')[1].replace('×', 'x'), num: Number($('#image-count').val()) } }).then(result => remoteRecord('image', result, title, state.imageMode, state.imageRatio)) : Promise.reject({ message: '当前没有可用的图像模型。' })); submit.then(() => toast('图像任务已提交，正在生成。', 'success')).catch(error => toast(error && error.message ? error.message : '图像任务提交失败。', 'error')).finally(() => { state.busy.image = false; render(); }); });
     $('[data-audio-mode]').on('click', function () { state.audioMode = $(this).data('audio-mode'); render(); });
     $('[data-voice]').on('click', function () { state.selectedVoice = $(this).data('voice'); render(); });
-    $('#audio-model-select').on('change', function () { state.selectedModelIds.audio = Number($(this).val()); render(); });
     $('#audio-text').on('input', function () { $('#audio-count').text(`${$(this).val().length} / 2000 字符`); });
     $('#audio-form').on('submit', function (event) { event.preventDefault(); const text = $('#audio-text').val().trim(); if (!text) return toast('请先输入需要合成的文本。', 'error'); if (state.busy.audio) return; state.busy.audio = true; const record = createRecord('audio', { title: text.slice(0, 20) + (text.length > 20 ? '…' : ''), mode: state.audioMode, meta: `${text.length} 字符`, shouldFail: shouldSimulateFailure(text) }); if (!record) { state.busy.audio = false; return; } state.busy.audio = false; toast('声音任务已提交，请在历史中查看进度。', 'success'); render(); });
     $('[data-video-duration]').on('click', function () { state.videoDuration = $(this).data('video-duration'); render(); });
-    $('#video-model-select').on('change', function () { state.selectedModelIds.video = Number($(this).val()); render(); });
     $('#video-form').on('submit', function (event) { event.preventDefault(); const prompt = $('#video-prompt').val().trim(); if (!prompt) return toast('请先描述要生成的视频内容。', 'error'); if (state.busy.video) return; state.busy.video = true; const record = createRecord('video', { title: prompt.slice(0, 20) + (prompt.length > 20 ? '…' : ''), mode: '文生视频', meta: state.videoDuration, shouldFail: shouldSimulateFailure(prompt) }); if (!record) { state.busy.video = false; return; } state.busy.video = false; toast('视频任务已提交，渲染可能需要几分钟。', 'success'); render(); });
     $('[data-billing-tab]').on('click', function () {
       state.billing.tab = $(this).data('billing-tab');
@@ -1190,6 +1473,58 @@
         toast(error && error.message ? error.message : '开票申请提交失败，请稍后重试。', 'error');
       });
     });
+
+    // ===== 个人中心 · API Key 管理 事件 =====
+    $('#api-key-create-open').on('click', function () { state.apiKeys.createOpen = true; render(); });
+    $('#api-key-create-cancel, #api-key-create-cancel-bottom').on('click', function () { state.apiKeys.createOpen = false; render(); });
+    $('#api-key-create-form').on('submit', function (event) {
+      event.preventDefault();
+      const name = normalizeText($('#api-key-name').val(), '', 100);
+      if (!name) return toast('请填写密钥名称。', 'error');
+      if (state.apiKeys.createBusy) return;
+      state.apiKeys.createBusy = true;
+      $('#api-key-create-submit').prop('disabled', true).text('正在生成…');
+      window.PortalApi.createApiKey({ name }).then(created => {
+        state.apiKeys.createBusy = false;
+        state.apiKeys.createOpen = false;
+        state.apiKeys.loaded = false;
+        state.apiKeys.created = created && typeof created === 'object' ? created : null;
+        toast('API Key 已生成，请立即复制保存。', 'success');
+        render();
+      }).catch(error => {
+        state.apiKeys.createBusy = false;
+        $('#api-key-create-submit').prop('disabled', false).text('生成 Key');
+        toast(error && error.message ? error.message : 'API Key 生成失败，请稍后重试。', 'error');
+      });
+    });
+    $('#api-key-copy').on('click', function () {
+      const created = state.apiKeys.created;
+      if (!created || !created.key) return;
+      const raw = `${created.name || ''} · ${created.key}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(raw).then(() => toast('已复制，请注意安全保存。', 'success')).catch(() => toast('复制失败，请手动选择复制。', 'error'));
+      } else {
+        const box = document.getElementById('api-key-reveal');
+        if (box) { const range = document.createRange(); range.selectNodeContents(box); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); document.execCommand('copy'); sel.removeAllRanges(); toast('已复制，请注意安全保存。', 'success'); }
+      }
+    });
+    $('[data-key-toggle]').on('click', function () {
+      const id = String($(this).data('key-toggle'));
+      const next = String($(this).data('key-next'));
+      if (state.apiKeys.busyId) return;
+      state.apiKeys.busyId = id;
+      window.PortalApi.updateApiKeyStatus(id, next).then(() => {
+        state.apiKeys.busyId = null;
+        state.apiKeys.loaded = false;
+        toast(next === 'enabled' ? 'API Key 已启用。' : 'API Key 已停用。', 'success');
+        render();
+      }).catch(error => {
+        state.apiKeys.busyId = null;
+        toast(error && error.message ? error.message : '状态更新失败。', 'error');
+        render();
+      });
+    });
+
     if (!window.PortalConfig.demoMode) {
       $('#image-submit, #audio-submit, #video-submit').prop('disabled', false).removeAttr('aria-disabled').each(function () {
         $(this).html(`${icon('layui-icon-release')} ${this.id === 'video-submit' ? '文生视频' : this.id === 'audio-submit' ? '生成音频' : '立即生成'}`);
@@ -1231,25 +1566,14 @@
       });
       $('#audio-form').off('submit').on('submit', function (event) {
         event.preventDefault();
-        const model = currentModel('audio');
+        const text = $('#audio-text').val().trim(); const model = currentModel('audio');
+        if (!text) return toast('请先输入需要合成的文本。', 'error');
         if (!model) return toast('当前没有可用的音频模型。', 'error');
         state.busy.audio = true;
-        if (state.audioMode === '语音识别') {
-          const file = $('#audio-file')[0] && $('#audio-file')[0].files && $('#audio-file')[0].files[0];
-          if (!file) { state.busy.audio = false; return toast('请先选择要识别的音频文件。', 'error'); }
-          window.PortalApi.upload(file).then(upload => {
-            return window.PortalApi.request({ url: '/api/tasks/audio/asr', method: 'POST', data: { model_id: model.id, audio_url: upload.url } })
-              .then(result => { remoteRecord('audio', result, String(file.name || '音频').slice(0, 20), state.audioMode, ''); toast('语音识别任务已提交。', 'success'); });
-          }).catch(error => toast(error && error.message ? error.message : '语音识别任务提交失败。', 'error'))
-            .finally(() => { state.busy.audio = false; render(); });
-        } else {
-          const text = $('#audio-text').val().trim();
-          if (!text) { state.busy.audio = false; return toast('请先输入需要合成的文本。', 'error'); }
-          window.PortalApi.request({ url: '/api/tasks/audio/clone', method: 'POST', data: { model_id: model.id, voice_name: state.selectedVoice, text } })
-            .then(result => { remoteRecord('audio', result, text.slice(0, 20), state.audioMode, `${text.length} 字符`); toast('声音任务已提交。', 'success'); })
-            .catch(error => toast(error && error.message ? error.message : '声音任务提交失败。', 'error'))
-            .finally(() => { state.busy.audio = false; render(); });
-        }
+        window.PortalApi.request({ url: '/api/tasks/audio/clone', method: 'POST', data: { model_id: model.id, voice_name: state.selectedVoice, text } })
+          .then(result => { remoteRecord('audio', result, text.slice(0, 20), state.audioMode, `${text.length} 字符`); toast('声音任务已提交。', 'success'); })
+          .catch(error => toast(error && error.message ? error.message : '声音任务提交失败。', 'error'))
+          .finally(() => { state.busy.audio = false; render(); });
       });
       $('#video-form').off('submit').on('submit', function (event) {
         event.preventDefault();
@@ -1356,100 +1680,208 @@
         toast(error && error.message ? error.message : '个人资料保存失败，请稍后重试。', 'error');
       });
     });
-    // -------- 模型管理(admin-models) --------
-    $('#admin-model-open').on('click', function () {
-      state.adminModels.formOpen = true;
-      state.adminModels.editingId = null;
-      state.adminModels.fetchModels = [];
+
+    // ===== 管理后台事件 =====
+    const adminIsOn = () => state.route === 'admin' && user.role === 'admin';
+    $('[data-admin-tab]').on('click', function () {
+      if (!adminIsOn()) return;
+      const tab = $(this).data('admin-tab');
+      if (state.admin.tab === tab) return;
+      state.admin.tab = tab;
       render();
     });
-    $('#admin-form-cancel').on('click', function () {
-      state.adminModels.formOpen = false;
-      state.adminModels.editingId = null;
-      state.adminModels.fetchModels = [];
+    $('[data-admin-page]').on('click', function () {
+      if (!adminIsOn()) return;
+      const section = $(this).data('admin-section');
+      const delta = Number($(this).data('admin-page'));
+      const rec = state.admin[section];
+      if (!rec) return;
+      rec.page = Math.max(1, rec.page + delta);
+      render();
+      adminFetch(section, section === 'users' ? adminUserQuery() : (section === 'models' || section === 'wallets' ? { keyword: rec.keyword } : undefined)).then(render);
+    });
+    $('#admin-user-search-btn').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.users.keyword = String($('#admin-user-search').val() || '').trim();
+      state.admin.users.role = String($('#admin-user-role').val() || '');
+      state.admin.users.status = String($('#admin-user-status').val() || '');
+      state.admin.users.page = 1;
+      render();
+      adminFetch('users', adminUserQuery()).then(render);
+    });
+    $('#admin-user-search').on('keydown', function (e) { if (e.key === 'Enter') $('#admin-user-search-btn').trigger('click'); });
+    $('#admin-user-role, #admin-user-status').on('change', function () { $('#admin-user-search-btn').trigger('click'); });
+    $('#admin-user-reset-btn').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.users.keyword = '';
+      state.admin.users.role = '';
+      state.admin.users.status = '';
+      state.admin.users.page = 1;
+      state.admin.users.formOpen = false;
+      state.admin.users.editing = null;
+      render();
+      adminFetch('users', {}).then(render);
+    });
+    $('[data-admin-user-edit]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-user-edit'));
+      const rec = (state.admin.users.records || []).find(item => Number(item.id) === id) || { id };
+      state.admin.users.editing = rec;
+      state.admin.users.formOpen = true;
       render();
     });
-    $(document).off('click.adminModelsEdit').on('click.adminModelsEdit', '[data-admin-edit]', function () {
-      state.adminModels.formOpen = true;
-      state.adminModels.editingId = Number($(this).data('admin-edit'));
-      state.adminModels.fetchModels = [];
+    $('#admin-user-form-cancel').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.users.formOpen = false;
+      state.admin.users.editing = null;
       render();
     });
-    $(document).off('click.adminModelsDelete').on('click.adminModelsDelete', '[data-admin-delete]', function () {
-      const id = Number($(this).data('admin-delete'));
-      if (!window.confirm('确定删除该模型吗？此操作无法撤销。')) return;
-      window.PortalApi.request({ url: `/api/admin/models/${id}`, method: 'DELETE' })
-        .then(() => { state.adminModels.loaded = false; toast('模型已删除。', 'success'); render(); })
-        .catch(error => toast(error && error.message ? error.message : '删除失败。', 'error'));
+    $('#admin-user-form').on('submit', function (e) {
+      e.preventDefault();
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('user-id'));
+      if (!id) { toast('缺少用户ID，无法保存。', 'error'); return; }
+      const balanceVal = String($('#au-balance').val() || '').trim();
+      const newPass = String($('#au-password').val() || '');
+      const payload = {
+        role: String($('#au-role').val() || 'user'),
+        real_auth_status: Number($('#au-auth').val()) || 0,
+        nickname: String($('#au-nickname').val() || '').trim() || null,
+        phone: String($('#au-phone').val() || '').trim() || null,
+        email: String($('#au-email').val() || '').trim() || null,
+        school: String($('#au-school').val() || '').trim() || null
+      };
+      if (newPass && newPass.length < 8) { toast('新密码至少 8 位。', 'error'); return; }
+      if (balanceVal !== '' && !Number.isFinite(Number(balanceVal))) { toast('余额调整需为整数(分)。', 'error'); return; }
+      const balanceDelta = balanceVal === '' ? null : Number(balanceVal);
+      state.admin.users.busy = true;
+      render();
+      Promise.resolve()
+        .then(() => window.PortalApi.adminUpdateUser(id, payload))
+        .then(() => (newPass ? window.PortalApi.adminResetPassword(id, newPass) : Promise.resolve()))
+        .then(() => (balanceDelta !== null ? window.PortalApi.adminAdjustBalance(id, balanceDelta, '管理后台手工调整') : Promise.resolve()))
+        .then(() => { state.admin.users.busy = false; state.admin.users.formOpen = false; state.admin.users.editing = null; toast('用户信息已保存。', 'success'); return adminFetch('users', adminUserQuery()); })
+        .then(render)
+        .catch(error => { state.admin.users.busy = false; toast(error && error.message ? error.message : '保存失败。', 'error'); render(); });
     });
-    $(document).off('click.adminModelsToggle').on('click.adminModelsToggle', '[data-admin-toggle]', function () {
-      const id = Number($(this).data('admin-toggle'));
-      const item = state.adminModels.items.find(m => String(m.id) === String(id));
-      const next = item && item.status === 'disabled' ? 'enabled' : 'disabled';
-      window.PortalApi.request({ url: `/api/admin/models/${id}/status`, method: 'PUT', data: { status: next } })
-        .then(() => { state.adminModels.loaded = false; render(); })
-        .catch(error => toast(error && error.message ? error.message : '状态更新失败。', 'error'));
+    $('[data-admin-user-toggle]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-user-toggle'));
+      const next = Number($(this).data('admin-user-next'));
+      state.admin.users.busyId = id;
+      render();
+      window.PortalApi.adminUpdateUserStatus(id, next).then(() => { toast('用户状态已更新。', 'success'); state.admin.users.busyId = null; return adminFetch('users', adminUserQuery()); }).then(render).catch(error => { state.admin.users.busyId = null; toast(error && error.message ? error.message : '更新失败。', 'error'); render(); });
     });
-    $(document).off('click.adminModelsPage').on('click.adminModelsPage', '[data-admin-page]', function () {
-      const pageCount = Math.max(1, Math.ceil((Number(state.adminModels.total) || state.adminModels.items.length) / state.adminModels.pageSize));
-      state.adminModels.page = Math.max(1, Math.min(pageCount, state.adminModels.page + Number($(this).data('admin-page'))));
-      state.adminModels.loaded = false;
+    $('[data-admin-user-del]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-user-del'));
+      const name = $(this).data('admin-user-username');
+      if (!window.confirm(`确定删除用户「${name}」？\n\n软删除后将无法登录，历史订单/消费数据保留可追溯。`)) return;
+      state.admin.users.busyId = id;
+      render();
+      window.PortalApi.adminDeleteUser(id).then(() => { toast('用户已删除(软删)。', 'success'); state.admin.users.busyId = null; return adminFetch('users', adminUserQuery()); }).then(render).catch(error => { state.admin.users.busyId = null; toast(error && error.message ? error.message : '删除失败。', 'error'); render(); });
+    });
+    $('#admin-model-search-btn').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.models.keyword = String($('#admin-model-search').val() || '').trim();
+      state.admin.models.page = 1;
+      render();
+      adminFetch('models', { keyword: state.admin.models.keyword }).then(render);
+    });
+    $('#admin-model-search').on('keydown', function (e) { if (e.key === 'Enter') $('#admin-model-search-btn').trigger('click'); });
+    $('#admin-wallet-search-btn').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.wallets.keyword = String($('#admin-wallet-search').val() || '').trim();
+      state.admin.wallets.page = 1;
+      render();
+      adminFetch('wallets', { keyword: state.admin.wallets.keyword }).then(render);
+    });
+    $('#admin-wallet-search').on('keydown', function (e) { if (e.key === 'Enter') $('#admin-wallet-search-btn').trigger('click'); });
+    $('#admin-model-toggle-form').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.models.formOpen = !state.admin.models.formOpen;
+      state.admin.models.editing = null;
       render();
     });
-    $('#admin-models-retry').on('click', function () { state.adminModels.loaded = false; state.adminModels.error = ''; render(); });
-    $('#admin-fetch-models').on('click', function () {
-      const baseUrl = ($('#admin-fetch-endpoint').val() || '').trim();
-      const apiKey = ($('#admin-fetch-api-key').val() || '').trim();
+    $('#admin-model-form-cancel').on('click', function () {
+      if (!adminIsOn()) return;
+      state.admin.models.formOpen = false;
+      state.admin.models.editing = null;
+      render();
+    });
+    $('#am-fetch-models').on('click', function () {
+      const baseUrl = String($('#am-fetch-endpoint').val() || '').trim();
+      const apiKey = String($('#am-fetch-key').val() || '').trim();
       if (!baseUrl) return toast('请先填写 base_url。', 'error');
-      state.adminModels.fetchBusy = true;
-      $('#admin-fetch-models').prop('disabled', true).text('拉取中…');
-      window.PortalApi.request({ url: '/api/admin/models/fetch', method: 'POST', data: { base_url: baseUrl, api_key: apiKey } })
-        .then(data => {
-          state.adminModels.fetchModels = Array.isArray(data && data.models) ? data.models : [];
-          if (!state.adminModels.fetchModels.length) toast('未获取到模型，请检查 base_url 与 api_key。', 'error');
-          else toast(`已获取 ${state.adminModels.fetchModels.length} 个模型。`, 'success');
-          render();
-        }).catch(error => toast(error && error.message ? error.message : '获取模型失败。', 'error'))
-        .finally(() => { state.adminModels.fetchBusy = false; });
+      window.PortalApi.adminFetchModels(baseUrl, apiKey).then(data => {
+        const models = Array.isArray(data && data.models) ? data.models : [];
+        if (!models.length) return toast('未获取到模型，请检查 base_url 与 api_key。', 'error');
+        $('#am-fetch-select').html('<option value="">— 选择获取到的模型 —</option>' + models.map(m => `<option value="${escapeHtml(m.id)}" data-name="${escapeHtml(m.name)}">${escapeHtml(m.name)}（${escapeHtml(m.id)}）</option>`).join(''));
+        toast(`已获取 ${models.length} 个模型。`, 'success');
+      }).catch(error => toast(error && error.message ? error.message : '获取模型失败。', 'error'));
     });
-    $('#admin-fetch-select').on('change', function () {
+    $('#am-fetch-select').on('change', function () {
       const id = $(this).val();
       const name = $(this).find('option:selected').data('name') || id;
-      if (id) { $('#admin-model-code').val(id); if (!$('#admin-name').val()) $('#admin-name').val(name); }
+      if (id) { $('#am-code').val(id); if (!$('#am-name').val()) $('#am-name').val(name); }
     });
-    $('#admin-model-form').on('submit', function (event) {
-      event.preventDefault();
-      if (state.adminModels.formBusy) return;
-      const name = normalizeText($('#admin-name').val(), '', 60);
-      const modelCode = normalizeText($('#admin-model-code').val(), '', 120);
-      const providerType = String($('#admin-provider-type').val() || 'online');
-      const modelType = String($('#admin-model-type').val() || 'text');
-      const vendor = normalizeText($('#admin-vendor').val(), '', 60);
-      const endpoint = ($('#admin-endpoint').val() || '').trim() || null;
-      const apiKey = ($('#admin-api-key').val() || '').trim() || null;
-      const price = Number($('#admin-price').val() || 0);
-      const maxDuration = Number($('#admin-max-duration').val()) || null;
-      const description = ($('#admin-description').val() || '').trim() || null;
-      const capabilityTags = ($('#admin-capability-tags').val() || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (!name || !modelCode || !vendor) return toast('请填写展示名、model_code 和供应商 vendor。', 'error');
-      const body = { name, model_code: modelCode, provider_type: providerType, model_type: modelType, vendor, endpoint, api_key: apiKey, price_per_call: price, max_duration_sec: maxDuration, description, capability_tags: capabilityTags.length ? capabilityTags : null };
-      state.adminModels.formBusy = true;
-      $('#admin-form-submit').prop('disabled', true).text('提交中…');
-      const req = state.adminModels.editingId != null
-        ? window.PortalApi.request({ url: `/api/admin/models/${state.adminModels.editingId}`, method: 'PUT', data: body })
-        : window.PortalApi.request({ url: '/api/admin/models', method: 'POST', data: body });
-      req.then(() => {
-        state.adminModels.formBusy = false;
-        state.adminModels.formOpen = false;
-        state.adminModels.editingId = null;
-        state.adminModels.loaded = false;
-        toast('模型已保存。', 'success');
-        render();
-      }).catch(error => {
-        state.adminModels.formBusy = false;
-        $('#admin-form-submit').prop('disabled', false).text(state.adminModels.editingId != null ? '保存修改' : '新增模型');
-        toast(error && error.message ? error.message : '模型保存失败。', 'error');
-      });
+    $('[data-admin-model-edit]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-model-edit'));
+      const rec = (state.admin.models.records || []).find(item => Number(item.id) === id);
+      state.admin.models.editing = rec || { id };
+      state.admin.models.formOpen = true;
+      render();
+    });
+    $('[data-admin-model-status]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-model-status'));
+      const next = $(this).data('admin-model-next');
+      state.admin.models.busyId = id;
+      render();
+      window.PortalApi.adminUpdateModelStatus(id, next).then(() => { toast('模型状态已更新。', 'success'); state.admin.models.busyId = null; return adminFetch('models', { keyword: state.admin.models.keyword }); }).then(render).catch(error => { state.admin.models.busyId = null; toast(error && error.message ? error.message : '更新失败。', 'error'); render(); });
+    });
+    $('[data-admin-model-del]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-model-del'));
+      const name = $(this).data('admin-model-name');
+      if (!window.confirm(`确定删除模型「${name}」？该操作不可恢复。`)) return;
+      state.admin.models.busyId = id;
+      render();
+      window.PortalApi.adminDeleteModel(id).then(() => { toast('模型已删除。', 'success'); state.admin.models.busyId = null; return adminFetch('models', { keyword: state.admin.models.keyword }); }).then(render).catch(error => { state.admin.models.busyId = null; toast(error && error.message ? error.message : '删除失败。', 'error'); render(); });
+    });
+    $('#admin-model-form').on('submit', function (e) {
+      e.preventDefault();
+      if (!adminIsOn()) return;
+      const id = String($(this).data('model-id') || '');
+      const payload = {
+        name: String($('#am-name').val() || '').trim(),
+        model_code: String($('#am-code').val() || '').trim(),
+        model_type: String($('#am-type').val() || 'text'),
+        provider_type: String($('#am-provider').val() || 'online'),
+        vendor: String($('#am-vendor').val() || 'siliconflow'),
+        price_per_call: Number($('#am-price').val()) || 0,
+        endpoint: String($('#am-endpoint').val() || '').trim() || null,
+        api_key: String($('#am-api-key').val() || '').trim() || null,
+        max_duration_sec: $('#am-duration').val() === '' ? null : Number($('#am-duration').val()),
+        description: String($('#am-desc').val() || '').trim() || null,
+        capability_tags: String($('#am-tags').val() || '').split(/[,，]/).map(t => t.trim()).filter(Boolean)
+      };
+      state.admin.models.busy = true;
+      render();
+      const call = id ? window.PortalApi.adminUpdateModel(Number(id), payload) : window.PortalApi.adminCreateModel(payload);
+      call.then(() => { state.admin.models.busy = false; state.admin.models.formOpen = false; state.admin.models.editing = null; toast('模型已保存。', 'success'); return adminFetch('models', { keyword: state.admin.models.keyword }); }).then(render).catch(error => { state.admin.models.busy = false; toast(error && error.message ? error.message : '保存失败。', 'error'); render(); });
+    });
+    $('[data-admin-invoice-review]').on('click', function () {
+      if (!adminIsOn()) return;
+      const id = Number($(this).data('admin-invoice-review'));
+      const next = $(this).data('admin-invoice-next');
+      const rec = (state.admin.invoices.records || []).find(item => Number(item.id) === id);
+      const tip = next === 'issued' ? '确定通过该开票申请？' : '确定驳回该开票申请？';
+      if (rec && !window.confirm(`${tip}（${rec.title}，¥${escapeHtml(money(rec.amount))}）`)) return;
+      state.admin.invoices.busyId = id;
+      render();
+      window.PortalApi.adminReviewInvoice(id, next).then(() => { toast('发票审核状态已更新。', 'success'); state.admin.invoices.busyId = null; return adminFetch('invoices'); }).then(render).catch(error => { state.admin.invoices.busyId = null; toast(error && error.message ? error.message : '审核失败。', 'error'); render(); });
     });
   }
 
@@ -1462,3 +1894,4 @@
   $(window).on('hashchange', render);
   $(function () { loadCurrentUser().then(loadModels).then(loadTaskHistory).finally(render); });
 }());
+
