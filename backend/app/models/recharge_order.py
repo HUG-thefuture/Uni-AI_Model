@@ -18,16 +18,16 @@ class RechargeOrder(Base):
     )
     id: Mapped[int] = pk_column()
     order_no: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, comment="业务订单号")
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True, comment="逻辑外键 users.id")
-    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="充值金额(分)")
-    points: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="到账积分/点数")
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 users.id")
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default='0', comment="充值金额(分)")
+    points: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default='0', comment="到账积分/点数")
 
-    payment_method: Mapped[str] = mapped_column(String(30), nullable=False, default='mock',
+    payment_method: Mapped[str] = mapped_column(String(30), nullable=False, default='mock', server_default='mock',
                                                 comment="支付方式: alipay / wxpay / bank / mock")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default='pending',
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='pending', server_default='pending',
                                         comment="pending / paid / failed / cancelled")
     external_trade_no: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="第三方支付流水号")
 
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="支付成功时间")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())

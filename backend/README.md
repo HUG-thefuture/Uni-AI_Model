@@ -37,7 +37,7 @@ backend/
 cd backend
 pip install -r requirements.txt
 copy .env.example .env      # 填好 DATABASE_URL / SECRET_KEY
-python -m app.init_db       # 建成员2的三张表(MySQL) —— 全量建表见 sql/
+python -m app.init_db       # 一步初始化:建表 + 写入全部模型种子(含阿里百炼,幂等)
 uvicorn app.main:app --reload --port 8000
 # 探针: curl http://127.0.0.1:8000/api/health
 ```
@@ -69,7 +69,7 @@ ollama list                    # 确认模型就绪(建议顺带 qwen2.5:3b)
 # 2. 配置 OLLAMA_BASE_URL(backend/.env,默认 http://localhost:11434,可省略)
 echo OLLAMA_BASE_URL=http://localhost:11434 >> .env
 
-# 3. 重建 4 个种子模型(幂等:线上对话/线上文生图 + 本地 qwen2.5:3b / qwen2.5:1.5b)
+# 3. 重建种子模型(推荐 python -m app.init_db 一步建表+全量种子;或单模板补种如下)
 python scripts/seed_models.py
 
 # 4. 启动后端,打开前端模型广场
@@ -203,11 +203,10 @@ pip install -r requirements.txt
 copy .env.example .env        # Linux/macOS: cp .env.example .env
 # 编辑 .env:必填 DATABASE_URL / SECRET_KEY;联调线上模型填 SILICONFLOW_API_KEY
 
-# 4. 初始化数据库(幂等建表)
+# 4. 一步初始化:幂等建表 + 写入全部 9 个模型种子(硅基流动/Ollama/阿里百炼,可重复执行)
 python -m app.init_db
 
-# 5. 写入 4 个种子模型(幂等 upsert:线上对话/线上文生图 + 本地 qwen2.5:3b / 1.5b)
-python scripts/seed_models.py
+# 5. (可选)单模板补种:python scripts/seed_models.py / python scripts/seed_dashscope_models.py
 
 # 6. (可选)写入演示数据:2 个演示用户 + 任务/会话/调用日志,断网演示可用
 DATABASE_URL=sqlite:///./demo.db SECRET_KEY=demo python scripts/seed_demo.py
@@ -222,8 +221,12 @@ uvicorn app.main:app --reload --port 8000
 
 | 命令 | 作用 |
 | --- | --- |
-| `python -m app.init_db` | 幂等建表(Base.metadata.create_all,已有表不受影响) |
-| `python scripts/seed_models.py` | 从 `docs/model-config-template.json` 幂等写入/更新 4 个模型 |
+| `python -m app.init_db` | **一步初始化(推荐)**:幂等建表 + 合并写入 docs/ 下全部 `model-config-*.json`(9 个模型,含阿里百炼);git pull 最新模型数据后执行这一条即可 |
+| `python -m app.init_db --schema-only` | 仅幂等建表并增量对齐结构,不写模型种子 |
+| `python -m app.schema_sync --check` | 只检查 ORM 与数据库的缺表/缺列/缺索引,不修改数据 |
+| `python -m app.schema_sync --apply` | 按 ORM 增量修复已有库的缺表/缺列/缺索引,不删除字段或数据 |
+| `python scripts/seed_models.py` | 单模板补种:仅 `docs/model-config-template.json` 的 4 个模型 |
+| `python scripts/seed_dashscope_models.py` | 单模板补种:仅 `docs/model-config-dashscope.json` 的 5 个阿里百炼模型 |
 | `python scripts/seed_demo.py` | 演示数据(demo_user/demo_admin、钱包余额 1000、任务/会话/日志),幂等可重复执行 |
 | `python scripts/test_m_series.py` | M-01~M-08 稳定性用例,结果写 `docs/m-series-result.md` |
 

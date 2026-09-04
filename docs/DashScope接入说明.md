@@ -28,6 +28,7 @@
 - `backend/.env.example` / `backend/.env`：新增 `DASHSCOPE_API_KEY`
 - `docs/model-config-dashscope.json`（新增，模型种子配置）
 - `backend/scripts/seed_dashscope_models.py`（新增，幂等写入 models 表）
+- `backend/app/model_seed.py`（新增，统一模型种子模块：`python -m app.init_db` 一步建表+写入全部模型，含本节 5 个阿里模型）
 
 ## 三、配置与初始化
 
@@ -35,13 +36,20 @@
 # 1. 配置 Key（.env，只存环境变量）
 DASHSCOPE_API_KEY=sk-xxx            # 阿里云百炼控制台获取
 
-# 2. 幂等写入 5 个 dashscope 模型到 models 表
+# 2. 一步初始化（推荐）：建表 + 幂等写入全部 9 个模型（含本节 5 个 dashscope 模型）
+cd backend
+python -m app.init_db
+
+# 2'. 或单模板补种：仅幂等写入 5 个 dashscope 模型
 cd backend
 python scripts/seed_dashscope_models.py
 
 # 3. 启动后端
 uvicorn app.main:app --reload --port 8000
 ```
+
+> 团队约定：模型模板统一放 `docs/model-config-*.json`。新增厂商模型 = 加一个模板 JSON，
+> 其他人 `git pull` 后执行 `python -m app.init_db` 即可拿到最新模型数据，无需改代码。
 
 写入的 5 个模型：qwen-plus / qwen-turbo（text）、wanx2.1-t2i-turbo（image）、
 qwen-tts（audio，合成）、fun-asr（audio，识别）。

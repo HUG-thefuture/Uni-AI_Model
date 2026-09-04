@@ -168,6 +168,10 @@
     listChatSessions(params) {
       return request({ url: `/api/chat/sessions${params ? `?${$.param(params)}` : ''}` });
     },
+    // Backward-compatible name used by the original text workspace.
+    listSessions(page, pageSize) {
+      return request({ url: `/api/chat/sessions?page=${page || 1}&page_size=${pageSize || 50}` });
+    },
     listSessionMessages(sessionId) {
       return request({ url: `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages` });
     },

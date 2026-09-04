@@ -80,11 +80,12 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         yield db
 
 
-def init_db() -> None:
-    """建表(注册全部模型映射)。"""
-    from ..models import ai_call_log, ai_task, model, user, api_key, consumption_record, operation_log, recharge_order  # noqa: F401 注册映射
+def init_db():
+    """创建并增量对齐全部 ORM 表结构，返回同步报告。"""
+    from .. import models  # noqa: F401 注册全部模型映射，包括发票和支撑表
+    from ..schema_sync import sync_schema
 
-    Base.metadata.create_all(bind=engine)
+    return sync_schema(engine, Base.metadata)
 
 
 async def run_db(fn: Callable[..., T], /, *args, **kwargs) -> T:

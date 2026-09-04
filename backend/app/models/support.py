@@ -38,6 +38,7 @@ class ApiUsageLog(Base):
     """api_usage_logs 开放平台调用统计(wp06 口径)。"""
 
     __tablename__ = "api_usage_logs"
+    __table_args__ = (Index("idx_usage_key_created", "key_id", "created_at"),)
 
     id: Mapped[int] = pk_column()
     key_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

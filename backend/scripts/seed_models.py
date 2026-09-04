@@ -4,87 +4,54 @@
 
     python scripts/seed_models.py
 
-- 按 model_code+provider_type 判重:存在则更新字段,不存在则插入,可重复执行;
-- 共 4 个模型:线上对话/线上文生图(siliconflow)+ 本地 qwen2.5:3b / qwen2.5:1.5b(ollama);
+- 幂等:按 model_code+provider_type 判重,存在则更新字段,不存在则插入,可重复执行;
+- 本脚本只补种 template 模板的 4 个模型;拉取最新全量模型数据(含阿里百炼)请直接:
+    python -m app.init_db
 - config_json 只存非敏感参数,密钥一律走环境变量(严禁入库);
 - 执行前自动建表(幂等,已有表不受影响)。
+
+实现统一在 app/model_seed.py,本文件仅保留兼容入口(seed_demo.py 以
+``seed_models.load_template() / seed_models.upsert_models()`` 方式复用)。
 """
-import json
 import sys
 from pathlib import Path
 
 # 保证可从 backend/ 目录直接执行:把 backend/ 加入 sys.path 以导入 app.*
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BACKEND_DIR))
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
-# 模板文件位于仓库根 docs/ 目录
-TEMPLATE_PATH = BACKEND_DIR.parent / "docs" / "model-config-template.json"
-
-# 模板条目中需要同步到 models 表的字段(跳过 "_说明" 等下划线开头键)
-SEED_FIELDS = (
-    "name", "model_code", "provider_type", "model_type", "vendor", "endpoint",
-    "price_per_call", "max_duration_sec", "status", "config_json",
-    "description", "capability_tags",
+from app.model_seed import (  # noqa: E402 统一实现在 app/model_seed.py
+    DEFAULT_TEMPLATE_PATH,
+    SEED_FIELDS,
+    load_template as _load_template_file,
+    seed_one,
+    upsert_models,
 )
 
+# 兼容旧引用:默认 template 模板路径
+TEMPLATE_PATH = DEFAULT_TEMPLATE_PATH
 
-def load_template(path: Path = TEMPLATE_PATH) -> list[dict]:
-    """读取模板 JSON,返回模型条目列表(忽略下划线开头的说明键)。"""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [
-        item for item in data.get("models", [])
-        if isinstance(item, dict) and item.get("model_code")
-    ]
+__all__ = ["SEED_FIELDS", "TEMPLATE_PATH", "load_template", "main", "upsert_models"]
 
 
-def upsert_models(db, items: list[dict]) -> dict:
-    """幂等 upsert:按 model_code+provider_type 判重,存在更新、缺失插入。
-
-    返回统计 {created, updated, total};调用方负责 commit(这里统一提交一次)。
-    """
-    from app.models.model import Model
-
-    created = updated = 0
-    for item in items:
-        existing = (
-            db.query(Model)
-            .filter(Model.model_code == item["model_code"],
-                    Model.provider_type == item["provider_type"])
-            .one_or_none()
-        )
-        if existing is None:
-            db.add(Model(**{f: item.get(f) for f in SEED_FIELDS}))
-            created += 1
-            print(f"[seed] 新增模型: {item['name']} ({item['model_code']}/{item['provider_type']})")
-        else:
-            for f in SEED_FIELDS:
-                setattr(existing, f, item.get(f))
-            updated += 1
-            print(f"[seed] 更新模型: {item['name']} ({item['model_code']}/{item['provider_type']})")
-    db.commit()
-    return {"created": created, "updated": updated, "total": len(items)}
+def load_template(path: Path | None = None) -> list[dict]:
+    """兼容旧签名:缺省读 docs/model-config-template.json。"""
+    return _load_template_file(path or TEMPLATE_PATH)
 
 
 def main() -> int:
-    """建表(幂等)→ 读模板 → 逐条 upsert → 输出结果。"""
+    """建表(幂等)→ 读 template 模板 → 逐条 upsert → 输出结果。"""
     try:
-        from app.core.db import Base, SessionLocal, init_db
-    except Exception as exc:  # noqa: BLE001 环境变量缺失等启动失败给出明确提示
+        result = seed_one(TEMPLATE_PATH)
+    except Exception as exc:  # noqa: BLE001 环境变量缺失/模板缺失给出明确提示
         print(f"[seed] 初始化失败: {exc}", file=sys.stderr)
         print("[seed] 请在 backend/ 目录下执行,并确认 .env 已配置 DATABASE_URL / SECRET_KEY",
               file=sys.stderr)
         return 1
-
-    init_db()  # 幂等建表(Base.metadata.create_all,已有表不受影响)
-    db = SessionLocal()
-    try:
-        items = load_template()
-        result = upsert_models(db, items)
-        print(f"[seed] 完成: 共 {result['total']} 个模型, "
-              f"新增 {result['created']} 个, 更新 {result['updated']} 个")
-        return 0
-    finally:
-        db.close()
+    print(f"[seed] 完成: 共 {result['total']} 个模型, "
+          f"新增 {result['created']} 个, 更新 {result['updated']} 个")
+    return 0
 
 
 if __name__ == "__main__":

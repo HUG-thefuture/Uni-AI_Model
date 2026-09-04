@@ -115,10 +115,10 @@ class UserApiTest(unittest.TestCase):
             json={"amount": 100, "payment_method": "bank"},
         )
         self.assertEqual(recharge.status_code, 200, recharge.text)
-        self.assertEqual(recharge.json()["payment_method"], "bank")
+        self.assertEqual(recharge.json()["data"]["payment_method"], "bank")
         wallet = self.client.get("/api/wallet/me", headers=self._auth(user_token))
         self.assertEqual(wallet.status_code, 200, wallet.text)
-        self.assertEqual(wallet.json()["balance"], 100)
+        self.assertEqual(wallet.json()["data"]["balance"], 100)
         invalid_method = self.client.post(
             "/api/wallet/recharge",
             headers=self._auth(user_token),
