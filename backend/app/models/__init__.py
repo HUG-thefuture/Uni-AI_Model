@@ -8,6 +8,7 @@ from .invoice import Invoice
 from .model import Model
 from .operation_log import OperationLog
 from .recharge_order import RechargeOrder
+from .sms_code import SmsCode
 from .support import ApiUsageLog, ChatMessage, ChatSession
 from .user import User, UserProfile, Wallet
 
@@ -16,4 +17,5 @@ __all__ = [
     "ConsumptionRecord", "ApiKey", "ApiUsageLog", "OperationLog",
     "User", "UserProfile", "Wallet", "Invoice",
     "ChatMessage", "ChatSession",
+    "SmsCode",
 ]

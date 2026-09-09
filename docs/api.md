@@ -26,7 +26,7 @@
 // 失败(「示例」,HTTP 状态码同步为对应错误码)
 {
   "code": 40900,
-  "message": "积分不足,请先充值",
+  "message": "余额不足,请先充值",
   "data": null,
   "request_id": "3f2a9c8e-1c4b-4f6e-9a2d-7b8c1d2e3f4a"
 }
@@ -43,7 +43,7 @@
 | 401 | 40100 | 未登录或凭证失效 / 缺少API Key / API Key 无效或已禁用 | JWT 或 API Key 鉴权失败 |
 | 403 | 40300 | 无权限,需要管理员身份 / 无权限访问该会话 / 无权限查看该任务 / 无权限操作该任务 | 权限不足或访问他人资源 |
 | 404 | 40400 | 模型不存在 / 会话不存在 / 任务不存在 | 资源不存在 |
-| 409 | 40900 | 模型已存在 / 模型维护中,暂不可调用 / 积分不足,请先充值 / 请勿重复提交 / 该模型存在 N 个进行中的任务,禁止删除 / 仅失败任务可以重试 | 唯一冲突、状态冲突、幂等冲突 |
+| 409 | 40900 | 模型已存在 / 模型维护中,暂不可调用 / 余额不足,请先充值 / 请勿重复提交 / 该模型存在 N 个进行中的任务,禁止删除 / 仅失败任务可以重试 | 唯一冲突、状态冲突、幂等冲突 |
 | 429 | 42900 | 请求过于频繁,请稍后重试 | 开放平台单 Key 每分钟超 30 次 |
 | 500 | 50000 | 服务异常 | 未捕获异常(响应同时记录服务端日志) |
 | 502 | 50200 | 生成失败,本次不扣费 | 开放平台上游调用失败/超时(不扣费) |
@@ -211,7 +211,7 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 | model_type | string | 是 | text / image / audio / video(非法 400) |
 | vendor | string | 是 | siliconflow / ollama / mock(非法 400) |
 | endpoint | string | 否 | 自定义端点,本地模型用,≤255 |
-| price_per_call | int | 是 | 积分点/次,≥0 |
+| price_per_call | int | 是 | 元/次,≥0 |
 | max_duration_sec | int | 否 | 音视频时长上限(秒),≥0 |
 | description | string | 否 | 模型说明,≤500 |
 | capability_tags | string[] | 否 | 能力标签,如 ["对话"] |
@@ -505,7 +505,7 @@ curl -N -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
   http://127.0.0.1:8000/api/tasks/text
 ```
 
-错误码(建流前返回统一 JSON 结构):400(message 超长等)、401、404(模型/会话不存在)、403(他人会话)、409(模型维护中 / 非 text 模型 / 积分不足)。
+错误码(建流前返回统一 JSON 结构):400(message 超长等)、401、404(模型/会话不存在)、403(他人会话)、409(模型维护中 / 非 text 模型 / 余额不足)。
 
 ### 5.2 POST /api/tasks/image
 
@@ -535,7 +535,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   http://127.0.0.1:8000/api/tasks/image
 ```
 
-错误码:400、401、404(模型不存在)、409(模型维护中 / 非 image 模型 / 重复提交 / 积分不足)。
+错误码:400、401、404(模型不存在)、409(模型维护中 / 非 image 模型 / 重复提交 / 余额不足)。
 
 ### 5.3 POST /api/tasks/audio/clone
 
@@ -561,7 +561,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   http://127.0.0.1:8000/api/tasks/audio/clone
 ```
 
-错误码:400(参数/时长超上限)、401、404、409(维护中 / 非 audio 模型 / 重复提交 / 积分不足)。
+错误码:400(参数/时长超上限)、401、404、409(维护中 / 非 audio 模型 / 重复提交 / 余额不足)。
 
 ### 5.4 POST /api/tasks/audio/asr
 
@@ -612,7 +612,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
   http://127.0.0.1:8000/api/tasks/video
 ```
 
-错误码:400(超长)、401、404、409(维护中 / 非 video 模型 / 重复提交 / 积分不足)。
+错误码:400(超长)、401、404、409(维护中 / 非 video 模型 / 重复提交 / 余额不足)。
 
 > 说明:线上(硅基流动)视频接口上游未定,线上模型视频任务会以 502/failed「上游视频接口暂不可用,请使用 Mock 模型演示」收尾且不扣费;Mock 模型(vendor=mock)可演示完整 pending→processing→succeeded 链路。
 
@@ -688,7 +688,7 @@ curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8000/api/tasks/2
 
 ### 5.8 POST /api/tasks/{task_id}/retry
 
-重试:仅 `failed` 的**异步任务**可重试(文本任务为同步流式,返回 409「请在会话中重新发送」)。重试会重新冻结积分并置回 `pending` 后台执行。
+重试:仅 `failed` 的**异步任务**可重试(文本任务为同步流式,返回 409「请在会话中重新发送」)。重试会重新冻结金额并置回 `pending` 后台执行。
 
 响应 200(「示例」,data):`{ "task_id": 2, "status": "pending" }`
 
@@ -699,7 +699,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:8000/api/tasks/2/retry
 ```
 
-错误码:401、403(他人任务)、404、409(非失败任务 / 文本任务 / 模型维护中 / 积分不足)。
+错误码:401、403(他人任务)、404、409(非失败任务 / 文本任务 / 模型维护中 / 余额不足)。
 
 ---
 
@@ -843,9 +843,9 @@ data: [DONE]
 | 401 | 40100 | API Key 无效或已禁用 | Key 哈希查不到 / status≠enabled / 已过期 / 所属用户被禁用;检查 Key 是否抄错、是否被后台禁用 |
 | 404 | 40400 | 模型不存在 | model 字段与 models 表 model_code 不一致,或该模型非 text 类型 |
 | 409 | 40900 | 模型维护中,暂不可调用 | 模型被管理员停用 |
-| 409 | 40900 | 积分不足,请先充值 | Key 所属用户钱包余额 < price_per_call |
+| 409 | 40900 | 余额不足,请先充值 | Key 所属用户钱包余额不足本次调用费用 |
 | 429 | 42900 | 请求过于频繁,请稍后重试 | 单 Key 60 秒窗口内超 30 次,降低频率或调大 OPENAPI_RATE_LIMIT_PER_MIN |
-| 502 | 50200 | 生成失败,本次不扣费 | 上游失败/超时/断连;查看服务端日志按 request_id 排查,冻结积分已退回,可直接重试 |
+| 502 | 50200 | 生成失败,本次不扣费 | 上游失败/超时/断连;查看服务端日志按 request_id 排查,冻结金额已退回,可直接重试 |
 
 ---
 
@@ -853,13 +853,57 @@ data: [DONE]
 
 所有模型调用(门户任务 + 开放平台)统一遵循:**预扣冻结 → 调用 → 成功结算 → 失败释放**,失败绝不扣费。
 
+金额口径(2026-09-07 起按「元」记账):
+- 账本内部单位为**微元**(1 元 = 1_000_000 微元,最小精度 0.000001 元),钱包余额、消费流水、任务费用均存微元整数;
+- **对外接口与前端统一展示「元」**(token 计费保留 4 位小数);充值/开票/管理员调整余额以「元」传入;
+- token 单价 `models.token_input_price/token_output_price` 单位 0.0001 **元**/千token(整数);
+- 每次调用按真实 usage **精确扣减**(不再有取整尾差,原 `wallets.credit_remainder` 累积器已废弃);
+- 存量数据迁移:`backend/scripts/migrate_ledger_to_yuan.py`(幂等,带标记表)。
+
+计费方式(models.billing_mode):
+- **per_call(按量)**:`models.price_per_call` 为**供应商成本单价**(元/张·条·次,DECIMAL(10,4));
+  售价 = 成本 × 加价比例(与 token 计费同口径);冻结按预估数量(图像未指定张数按 2 张保守冻结),
+  结算按**实际产出数量**(对齐百炼官方公式「费用 = 单价 × 图片张数」;视频按条),差额多退少不补;
+- **per_token(按实际 token)**:冻结=按输入估算+输出封顶的预扣额(微元);结算=`输入token×输入售价+输出token×输出售价`(0.0001 元/千token),实际结算多退少不补,差额自动退回余额。
+
+盈利口径(平台在供应商成本上加价):
+- `models.token_input_price/token_output_price` 为**供应商成本价**;
+- 用户售价 = 成本 × 加价比例(`models.token_markup_pct`,为空回退全局 `TOKEN_MARKUP_PCT`,默认 130 = 加价 30%);
+- 门户 `GET /api/models` 返回的是**售价**;管理端 `GET /api/admin/models` 返回成本 + 加价比例 + 核算后的售价(`sell_input_price/sell_output_price`);
+- `GET /api/admin/stats/usage` 返回 `token_revenue/token_provider_cost/token_profit`(按 token 成功任务的收入、成本、毛利)。
+
+**成本价对照官方文档**(2026-09-07 核对,单价均为 0.0001 元/千token,即「元/百万token ÷ 10」):
+
+| 模型 | 供应商 | 官方牌价 | 成本价(入/出) | 平台售价(入/出,×1.3) | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| deepseek-ai/DeepSeek-V4-Flash | 硅基流动 | ¥3.00/¥9.00 每百万token(标准时段;2-8点半价 ¥1.50/¥4.50) | 30 / 90 | 39 / 117 | 官网取**标准时段**为成本基准,避免低价时段账单高于成本 |
+| zai-org/GLM-5.2 | 硅基流动 | ¥6.00/¥24.00 每百万token(输入≤32k 档) | 60 / 240 | 78 / 312 | 校园对话场景输入普遍 <32k,取该档 |
+| Qwen/Qwen2.5-7B-Instruct | 硅基流动 | 约 ¥0.35 每百万token(Pro 版) | 4 / 4 | 5 / 5 | 官方价向上取整到最小计价单位 |
+| qwen-plus | 阿里百炼 | ¥0.80/¥2.00 每百万token | 8 / 20 | 10 / 26 | 百炼官方定价 |
+| qwen-turbo | 阿里百炼 | ¥0.30/¥0.60 每百万token | 3 / 6 | 4 / 8 | 百炼官方定价 |
+
+来源:[硅基流动价格页](https://siliconflow.cn/pricing)、[硅基流动计费规则](https://docs.siliconflow.com/cn/faqs/billing-rules)(价格以官网实时为准)、百炼模型计费控制台。供应商调价时仅需改 `models.token_input_price/token_output_price`,售价与利润自动随加价比例重算。
+
+**图像/视频成本单价对照官方文档**(2026-09-07 核对,`models.price_per_call`,元/张·条;售价 = 成本 × 加价):
+
+| 模型 | 供应商 | 官方牌价 | 成本单价 | 平台售价(×1.3) | 依据 |
+| --- | --- | --- | --- | --- | --- |
+| Qwen/Qwen-Image | 硅基流动 | ¥0.30/张 | 0.30 元/张 | ¥0.39/张 | 官方牌价(第三方调研一致) |
+| Kwai-Kolors/Kolors | 硅基流动 | ¥0.14/张 | 0.14 元/张 | ¥0.18/张 | 官方价格页实时为准 |
+| stabilityai/stable-diffusion-3-5-large | 硅基流动 | 约 ¥0.12-0.25/张 | 0.25 元/张(取 Large 档保守值) | ¥0.33/张 | 第三方整理;型号在线状态以官方价格页为准 |
+| wanx2.1-t2i-turbo | 阿里百炼 | ¥0.14/张(国际站约 ¥0.18) | 0.14 元/张 | ¥0.18/张 | 百炼官方公式「费用=单价×张数」 |
+| Wan-AI/Wan2.2-T2V-A14B | 硅基流动 | ¥2.00/条 | 2.00 元/条 | ¥2.60/条 | 官方上线公告(国内版 2 元/Video) |
+| Wan-AI/Wan2.2-I2V-A14B | 硅基流动 | ¥2.00/条 | 2.00 元/条 | ¥2.60/条 | 同上 |
+
+来源:[硅基流动价格页](https://siliconflow.cn/pricing)、[硅基流动更新公告](https://docs.siliconflow.cn/cn/release-notes/overview)、[百炼万相文生图 API](https://help.aliyun.com/zh/model-studio/text-to-image-v2-api-reference)、[阿里云模型调用价格](https://help.aliyun.com/zh/model-studio/model-pricing)。音频模型仍按次计费(元/次),同享加价口径。
+
 | 阶段 | 实现 | 对账口径 |
 | --- | --- | --- |
-| 冻结 | `billing.freeze`:行锁校验余额,余额不足 409「积分不足,请先充值」;冻结=立即扣减(数据字典 wallets 无冻结列),任务 cost_status=frozen | 任务 cost = models.price_per_call |
-| 结算 | `billing.settle`:成功后累计 total_consumed 并写 consumption_records 流水,任务 cost_status=settled | balance 减少量 = settled 任务 cost 之和 |
-| 释放 | `billing.refund`:超时/断连/上游异常时等额退回,任务 cost=0、cost_status=refunded | 失败任务 cost 恒为 0 |
+| 冻结 | `billing.freeze`:行锁校验余额,余额不足 409「余额不足,请先充值」;冻结=立即扣减,任务 cost_status=frozen | 按次任务 cost = price_per_call×10⁶(微元);按 token 任务 cost = frozen_cost(预扣估算,微元) |
+| 结算 | `billing.settle`(按次)/`billing.settle_usage`(按 token):累计 total_consumed、写 consumption_records(含 balance_before/after 台账),任务 cost_status=settled | balance 减少量 = settled 任务 cost 之和;按 token 时差额自动退回 |
+| 释放 | `billing.refund`:超时/断连/上游异常时等额退回并写 status='refunded' 流水,任务 cost=0、cost_status=refunded | 失败任务 cost 恒为 0 |
 
-验证方式:任意一笔失败任务的 `GET /api/tasks/{id}` 中 `cost=0`;余额只随 succeeded 任务减少(参考 `docs/m-series-result.md` M-04/M-07/M-08 对平结论)。
+验证方式:任意一笔失败任务的 `GET /api/tasks/{id}` 中 `cost=0`;余额只随 succeeded 任务减少;`GET /api/stats/usage` 的 total_tokens 来自 ai_tasks 真实聚合。
 
 ## 附录 B. Mock 演示模式说明(vendor=mock)
 
@@ -892,4 +936,59 @@ curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: applicati
 - 线上视频上游查询接口未定:provider 无 `query_video` 时仅空轮询,超 `VIDEO_POLL_MAX_SEC` 判 failed 不扣费(`services/task_service.py` `_poll_video_result`);
 - 音视频时长实测依赖 ffprobe,本期仅校验提交方声明的 `duration_sec`(`services/av_service.py` `check_duration`);
 - 任务 `elapsed_sec` 时区口径:现按 UTC naive 计算,前端展示前需统一为 UTC+8;
-- `providers/base.py` 尚未接入 `app/core/http_client.py` 的共享连接池单例(WP10 登记,后续替换)。
+- 登出黑名单为进程内内存实现,多 worker/多实例部署需替换为 Redis 共享存储(`core/token_blacklist.py`)。
+
+## 附录 D. 新增能力一览(计费升级 / 短信 / 支付 / 商业化)
+
+### D1. 按 token 计费
+- `models` 新字段:`billing_mode`(per_call/per_token)、`token_input_price`、`token_output_price`(0.0001 元/千token);
+- `wallets` 新字段:`credit_remainder`(已废弃,迁移时并入余额);`ai_tasks` 新字段:`frozen_cost`/`prompt_tokens`/`completion_tokens`;`ai_call_logs` 新增三个 token 列;
+- 文本对话 SSE `done` 事件:`{"done":true,"task_id":N,"cost":N,"tokens":N,"prompt_tokens":N,"completion_tokens":N}`;
+- 开放平台流式响应最后一个 chunk 携带 `usage`(OpenAI 兼容口径);
+- `GET /api/stats/usage`:`total_tokens`/`total_cost`/`total_call` 为真实聚合;支持 `model_id`/`task_type`/`days`/`limit` 查询参数,并返回 `model_breakdown` 按模型汇总。
+
+### D2. 短信验证码(阿里云 Dysmsapi)
+配置 `ALIYUN_SMS_*` 后真实发信;未配置时验证码仅写服务端日志;`SMS_DEBUG=true` 时响应回显 `debug_code`(仅开发环境)。
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/auth/sms/send` | {phone, purpose: login/bind} → 发送验证码;同号 60s/条、每日 ≤10 条、同 IP 每日 ≤20 条 |
+| `POST /api/auth/sms/login` | {phone, code} → 登录;未注册自动注册(赠 DEFAULT_REGISTER_POINTS 元) |
+| `POST /api/auth/sms/bind` | 需登录,{phone, code} → 绑定/换绑手机号(users.phone 唯一) |
+
+安全:验证码 6 位、sha256+盐存储、5 分钟有效、错 5 次作废、响应不泄露手机号注册状态。
+
+### D3. 充值支付(沙箱双模式)
+- **支付宝沙箱**(配置 ALIPAY_* 后自动启用):下单 → 跳转沙箱收银台 → 异步 notify 验签入账;本地开发用回跳后 `POST /api/wallet/orders/{no}/sync` 同步查单闭环;
+- **内置模拟收银台**(默认):下单返回 `/pay.html?order_no=...` → 页面「确认支付」调 mock-pay 幂等入账。
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/wallet/recharge` | {amount: 1-100000 元, payment_method: alipay/mock} → {order_no, status: pending, pay_mode, pay_url} |
+| `GET /api/wallet/orders/{no}` | 订单状态(轮询用) |
+| `POST /api/wallet/orders/{no}/mock-pay` | 内置收银台确认支付(仅未配置支付宝时开放,幂等) |
+| `POST /api/wallet/orders/{no}/sync` | 同步查单入账(alipay.trade.query) |
+| `POST /api/wallet/notify/alipay` | 支付宝异步通知(公开,验签,明文 success/fail) |
+| `GET /api/wallet/records/export` | 账单流水 CSV 导出(UTF-8 BOM,Excel 直接打开) |
+
+金额口径(2026-09-07 起):全平台按「元」记账,账本内部为微元(1 元 = 10_000 微元),对外接口统一返回元。
+
+### D4. 开放平台接入信息(便于复制)
+创建/管理 API Key 时,门户同步展示可直接复制的接入信息:
+- **API Base URL**:`{后端地址}/api/v1`(如 `http://127.0.0.1:8000/api/v1`);
+- **对话接口**:`{base_url}/chat/completions`(OpenAI 兼容,`Authorization: Bearer sk-xxx`);
+- **可用模型**:从 `GET /api/models` 读取文本模型的 `vendor` 与 `model_code`,逐项可复制;
+- **调用示例**:自动生成 curl / Python 示例,填入刚创建的 Key(明文仅创建响应返回一次)。
+
+API Key 管理接口(全部统一响应壳):
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/api_keys` | {name} 创建,返回明文 Key(仅一次) |
+| `GET /api/api_keys` | 我的 Key 列表 |
+| `PUT /api/api_keys/{id}/status` | {status: enabled/disabled} 停用可恢复 |
+| `DELETE /api/api_keys/{id}` | 删除 Key(物理删除,立即失效不可恢复;他人 Key 一律 404) |
+
+### D5. Token 用量明细
+- `GET /api/stats/usage`:`data.items` 返回最近 20 条成功任务的逐条明细(时间/模型/类型/输入token/输出token/合计/扣费);
+- `GET /api/wallet/records`:消费流水附 `model_name/prompt_tokens/completion_tokens`;
+- `GET /api/wallet/records/export`:CSV 增加输入/输出 token 列。

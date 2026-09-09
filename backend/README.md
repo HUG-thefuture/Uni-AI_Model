@@ -88,7 +88,7 @@ uvicorn app.main:app --reload --port 8000
 
 - 门户列表:本地模型 `available=false`(60 秒缓存过期后自动恢复探测),列表照常返回不阻塞;
 - 发起调用:返回「本地模型服务未启动,请联系管理员」(provider_unreachable),
-  任务失败不扣费(冻结积分全额退回);
+  任务失败不扣费(冻结金额全额退回);
 - 管理端详情 `GET /api/admin/models/{id}` 不受影响,可查看近 7 天逐日调用量
   (daily_stats)与错误分布(error_stats)排障。
 
@@ -131,12 +131,47 @@ sqlite 分支(测试/演示)不套用上述池参数,保持 `check_same_thread=F
 | `OPENAPI_RATE_LIMIT_PER_MIN` | 30 | 单 API Key 每分钟调用上限 |
 | `VIDEO_POLL_INTERVAL_SEC / MAX_SEC` | 5 / 300 | 视频句柄轮询间隔/上限 |
 | `JWT_EXPIRE_HOURS` | 24 | 登录态有效期 |
+| `CORS_ORIGINS` | `""` | 逗号分隔 CORS 白名单;为空仅允许 localhost/127.0.0.1,生产必须显式配置 |
 
-### HTTP 连接复用(WP09 就绪,WP10 接入)
+### 短信验证(阿里云 Dysmsapi)
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ALIYUN_SMS_ACCESS_KEY_ID/SECRET` | `""` | 阿里云 AccessKey(建议 RAM 子账号,仅授权短信权限);4 项短信配置齐全才真实发信 |
+| `ALIYUN_SMS_SIGN_NAME` / `ALIYUN_SMS_TEMPLATE_CODE` | `""` | 短信签名/模板 CODE(变量为 `${code}`) |
+| `SMS_DEBUG` | `false` | 未配置阿里云时回显验证码到响应(仅开发/演示环境开启!) |
+| `SMS_CODE_EXPIRE_SEC` / `SMS_CODE_MAX_ATTEMPTS` | 300 / 5 | 验证码有效期/最大错误次数 |
+| `SMS_SEND_PER_DAY` / `SMS_IP_SEND_PER_DAY` | 10 / 20 | 同号每日/同 IP 每日发送上限 |
+
+**免费额度申请步骤**(个人/企业认证后):控制台开通短信服务 → 国内消息「测试签名/模板」申请(免费,测试签名【阿里云短信测试】+ 对应测试模板,仅可发给控制台绑定的白名单手机号)→ 把签名/模板 CODE 填入 `.env` → 新用户默认含免费条数。正式签名/模板需审核,用于非白名单手机号。
+
+### 支付(支付宝沙箱 + 内置模拟收银台)
+
+- **未配置** `ALIPAY_APP_ID/ALIPAY_PRIVATE_KEY/ALIPAY_PUBLIC_KEY` 时自动使用**内置模拟收银台**:充值下单 → `/pay.html` 页面「确认支付(沙箱模拟)」→ mock-pay 幂等入账,零配置演示完整闭环;
+- **配置后**走支付宝沙箱真实网关(默认 `https://openapi-sandbox.dl.alipaydev.com/gateway.do`):开放平台沙箱 APPID → 沙箱密钥工具生成 RSA2 密钥对 → 应用私钥填 `ALIPAY_PRIVATE_KEY`、**支付宝公钥**填 `ALIPAY_PUBLIC_KEY`(注意不是应用公钥)→ 下单跳转沙箱收银台,用沙箱买家账号支付;`ALIPAY_RETURN_URL` 填 `http://127.0.0.1:4174/pay.html` 即可本地闭环(回跳后同步查单);公网部署再配 `ALIPAY_NOTIFY_URL` 接收异步通知;
+- 金额口径(2026-09-07 起):全平台按「元」记账,账本内部为微元(1 元 = 1_000_000 微元);存量积分数据用 `scripts/migrate_ledger_to_yuan.py` 一次性迁移;生产上线把 `ALIPAY_GATEWAY` 换成正式网关。
+
+### 开放平台接入信息(便于复制)
+
+创建/管理 API Key 时,门户「开放平台」页同步展示可直接复制的接入信息:
+API Base URL(`{后端地址}/api/v1`)、对话接口路径、可用模型的 `vendor / model_code` 列表,
+以及自动填入新 Key 的 curl / Python 调用示例(Key 明文仅在创建响应返回一次)。
+
+### 运营参数
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `DEFAULT_REGISTER_POINTS` | 10 | 新用户注册赠送金额(元,零门槛体验模型) |
+| `TOKEN_MARKUP_PCT` | 130 | 盈利:按 token 模型售价 = 供应商成本价 × 加价比例(130=加价30%);模型行 `token_markup_pct` 非空时优先 |
+
+管理端「概览」提供按 token 模型的盈利报表(收入/供应商成本/毛利);用户「用量统计」页可查看最近 20 次调用的逐条 token 用量与扣费,个人账单的消费流水同样带模型名与 token 明细,支持 CSV 导出。
+
+### HTTP 连接复用(WP09 就绪,WP10 已接入)
 
 `app/core/http_client.py` 提供进程级共享 `httpx.AsyncClient` 单例
-(`max_connections=100 / max_keepalive_connections=20`)。本期 providers 层
-尚未接入(登记 TODO),WP10 由 `providers/base.py` 逐步替换为复用该单例。
+(`max_connections=100 / max_keepalive_connections=20`)。providers 层
+(`providers/base.py` 的非流式 POST 与流式建连、DashScope 任务轮询/下载)已全部
+接入该单例;短信发送与支付宝查单同样复用。
 
 ### Mock 显式延迟(测试/演示用)
 

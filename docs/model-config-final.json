@@ -13,7 +13,53 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "硅基流动托管的中英文对话模型,用于文本对话主链路",
-      "capability_tags": ["对话", "推理"]
+      "capability_tags": [
+        "对话",
+        "推理"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 4,
+      "token_output_price": 4
+    },
+    {
+      "name": "DeepSeek V4 Flash(线上)",
+      "model_code": "deepseek-ai/DeepSeek-V4-Flash",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "硅基流动托管的 DeepSeek 高速对话模型,成本价对齐官方标准时段定价(2026-09-07 核对)",
+      "capability_tags": [
+        "对话",
+        "推理"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 30,
+      "token_output_price": 90
+    },
+    {
+      "name": "GLM 5.2(线上)",
+      "model_code": "zai-org/GLM-5.2",
+      "provider_type": "online",
+      "model_type": "text",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 1,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
+      "description": "硅基流动托管的智谱 GLM 对话模型,成本价对齐官方 32k 档定价(2026-09-07 核对)",
+      "capability_tags": [
+        "对话",
+        "推理"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 60,
+      "token_output_price": 240
     },
     {
       "name": "Stable Diffusion 文生图(线上)",
@@ -22,12 +68,14 @@
       "model_type": "image",
       "vendor": "siliconflow",
       "endpoint": null,
-      "price_per_call": 10,
+      "price_per_call": 0.25,
       "max_duration_sec": null,
       "status": "enabled",
       "config_json": "{\"image_size\": \"1024x1024\", \"num_inference_steps\": 28}",
-      "description": "硅基流动文生图模型,用于图像生成任务",
-      "capability_tags": ["图像生成"]
+      "description": "硅基流动文生图模型,用于图像生成任务(成本价对齐官方牌价 2026-09-07 核对)",
+      "capability_tags": [
+        "图像生成"
+      ]
     },
     {
       "name": "Qwen2.5 3B(本地 Ollama)",
@@ -41,7 +89,13 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"num_ctx\": 4096}",
       "description": "Ollama 本地部署的小参数对话模型,免费演示与断网兜底",
-      "capability_tags": ["对话", "本地"]
+      "capability_tags": [
+        "对话",
+        "本地"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 2,
+      "token_output_price": 2
     },
     {
       "name": "Qwen2.5 1.5B(本地 Ollama)",
@@ -55,7 +109,13 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7}",
       "description": "Ollama 本地小参数模型,免费演示与断网兜底",
-      "capability_tags": ["对话", "本地"]
+      "capability_tags": [
+        "对话",
+        "本地"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 2,
+      "token_output_price": 2
     },
     {
       "name": "Qwen-Plus 对话(百炼)",
@@ -69,7 +129,14 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "阿里云百炼 Qwen-Plus 对话模型,免费额度,文本对话主链路",
-      "capability_tags": ["对话", "推理", "百炼"]
+      "capability_tags": [
+        "对话",
+        "推理",
+        "百炼"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 8,
+      "token_output_price": 20
     },
     {
       "name": "Qwen-Turbo 对话(百炼)",
@@ -83,7 +150,14 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "阿里云百炼 Qwen-Turbo 快速低成本对话模型",
-      "capability_tags": ["对话", "百炼", "快速"]
+      "capability_tags": [
+        "对话",
+        "百炼",
+        "快速"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 3,
+      "token_output_price": 6
     },
     {
       "name": "通义万相文生图(百炼)",
@@ -92,12 +166,91 @@
       "model_type": "image",
       "vendor": "dashscope",
       "endpoint": null,
-      "price_per_call": 10,
+      "price_per_call": 0.14,
       "max_duration_sec": 120,
       "status": "enabled",
       "config_json": "{\"image_size\": \"1024*1024\", \"num\": 1}",
-      "description": "阿里云百炼通义万相文生图模型,异步提交轮询出图",
-      "capability_tags": ["图像生成", "百炼"]
+      "description": "阿里云百炼通义万相文生图模型,异步提交轮询出图(成本价对齐官方牌价 2026-09-07 核对)",
+      "capability_tags": [
+        "图像生成",
+        "百炼"
+      ]
+    },
+    {
+      "name": "Qwen Image(线上)",
+      "model_code": "Qwen/Qwen-Image",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 0.3,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": null,
+      "description": "SiliconFlow 官方文生图模型,成本价对齐官方牌价(2026-09-07 核对)",
+      "capability_tags": [
+        "图像生成"
+      ],
+      "billing_mode": "per_call",
+      "token_input_price": 0,
+      "token_output_price": 0
+    },
+    {
+      "name": "Kolors 文生图(线上)",
+      "model_code": "Kwai-Kolors/Kolors",
+      "provider_type": "online",
+      "model_type": "image",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 0.14,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": null,
+      "description": "快手可图文生图模型,成本价对齐官方牌价(2026-09-07 核对)",
+      "capability_tags": [
+        "图像生成"
+      ],
+      "billing_mode": "per_call",
+      "token_input_price": 0,
+      "token_output_price": 0
+    },
+    {
+      "name": "Wan 2.2 文生视频(线上)",
+      "model_code": "Wan-AI/Wan2.2-T2V-A14B",
+      "provider_type": "online",
+      "model_type": "video",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 2.0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": null,
+      "description": "SiliconFlow 官方 Wan 2.2 文生视频模型,成本价对齐官方牌价 ¥2/条(2026-09-07 核对)",
+      "capability_tags": [
+        "视频生成"
+      ],
+      "billing_mode": "per_call",
+      "token_input_price": 0,
+      "token_output_price": 0
+    },
+    {
+      "name": "Wan 2.2 图生视频(线上)",
+      "model_code": "Wan-AI/Wan2.2-I2V-A14B",
+      "provider_type": "online",
+      "model_type": "video",
+      "vendor": "siliconflow",
+      "endpoint": null,
+      "price_per_call": 2.0,
+      "max_duration_sec": null,
+      "status": "enabled",
+      "config_json": null,
+      "description": "SiliconFlow 官方 Wan 2.2 图生视频模型,成本价对齐官方牌价 ¥2/条(2026-09-07 核对)",
+      "capability_tags": [
+        "视频生成"
+      ],
+      "billing_mode": "per_call",
+      "token_input_price": 0,
+      "token_output_price": 0
     },
     {
       "name": "Qwen-TTS 声音合成(百炼)",
@@ -111,7 +264,10 @@
       "status": "enabled",
       "config_json": "{}",
       "description": "阿里云百炼语音合成模型,文本转语音",
-      "capability_tags": ["语音合成", "百炼"]
+      "capability_tags": [
+        "语音合成",
+        "百炼"
+      ]
     },
     {
       "name": "Fun-ASR 语音识别(百炼)",
@@ -125,7 +281,10 @@
       "status": "enabled",
       "config_json": "{}",
       "description": "阿里云百炼语音识别模型,音频转文本(需公网音频地址)",
-      "capability_tags": ["语音识别", "百炼"]
+      "capability_tags": [
+        "语音识别",
+        "百炼"
+      ]
     }
   ]
 }

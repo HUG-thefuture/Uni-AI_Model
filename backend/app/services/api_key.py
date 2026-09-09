@@ -48,3 +48,13 @@ async def update_api_keys(db:AsyncSession,user_id:int,key_id:int,status:str)->Ap
     await db.refresh(key)
     return key
 
+
+async def delete_api_key(db:AsyncSession,user_id:int,key_id:int)->bool:
+    """删除 API Key(物理删除):不存在或非本人返回 False,由路由转 404。"""
+    key = await db.scalar(select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user_id))
+    if not key:
+        return False
+    await db.delete(key)
+    await db.commit()
+    return True
+

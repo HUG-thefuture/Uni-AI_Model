@@ -3,6 +3,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.response import APIError
+from ..services.pricing import to_micro, to_yuan
 from ..core.security import hash_password
 from ..models.ai_call_log import AiCallLog
 from ..models.ai_task import AiTask
@@ -52,10 +53,11 @@ async def list_users(
         filters.append(User.status == status)
     elif not include_deleted:
         filters.append(User.status != -1)  # 默认排除软删除
+    # 余额区间筛选以「元」传入,账本为微元
     if balance_min is not None:
-        filters.append(Wallet.balance >= balance_min)
+        filters.append(Wallet.balance >= to_micro(balance_min))
     if balance_max is not None:
-        filters.append(Wallet.balance <= balance_max)
+        filters.append(Wallet.balance <= to_micro(balance_max))
 
     base = (
         select(User, Wallet, UserProfile)
@@ -88,9 +90,9 @@ async def list_users(
             "nickname": p.nickname if p else None,
             "phone": p.phone if p else None,
             "email": p.email if p else None,
-            "balance": w.balance if w else 0,
-            "total_recharged": w.total_recharged if w else 0,
-            "total_consumed": w.total_consumed if w else 0,
+            "balance": to_yuan(w.balance) if w else 0.0,
+            "total_recharged": to_yuan(w.total_recharged) if w else 0.0,
+            "total_consumed": to_yuan(w.total_consumed) if w else 0.0,
             "created_at": str(u.created_at),
         }
         for u, w, p in rows
@@ -175,9 +177,9 @@ async def get_user_detail(db: AsyncSession, target_id: int) -> dict:
         "email": profile.email if profile else None,
         "major": profile.major if profile else None,
         "bio": profile.bio if profile else None,
-        "balance": wallet.balance if wallet else 0,
-        "total_recharged": wallet.total_recharged if wallet else 0,
-        "total_consumed": wallet.total_consumed if wallet else 0,
+        "balance": to_yuan(wallet.balance) if wallet else 0.0,
+        "total_recharged": to_yuan(wallet.total_recharged) if wallet else 0.0,
+        "total_consumed": to_yuan(wallet.total_consumed) if wallet else 0.0,
         "created_at": str(user.created_at),
         "updated_at": str(user.updated_at),
     }
@@ -210,7 +212,8 @@ async def update_user(db: AsyncSession, target_id: int, payload, operator: User)
 async def adjust_balance(
     db: AsyncSession, target_id: int, amount: int, reason: str | None, operator: User
 ) -> Wallet:
-    """管理员调整余额:正数增加,负数扣减(不允许扣成负数)。"""
+    """管理员调整余额(元):正数增加,负数扣减(不允许扣成负数);账本按微元记账。"""
+    amount = to_micro(amount)
     if amount == 0:
         raise APIError(400, "调整额不能为 0")
     user = await db.get(User, target_id)
@@ -224,7 +227,7 @@ async def adjust_balance(
         db.add(wallet)
         await db.flush()
     if amount < 0 and wallet.balance + amount < 0:
-        raise APIError(400, f"扣减后余额不能为负,当前余额 {wallet.balance} 分")
+        raise APIError(400, f"扣减后余额不能为负,当前余额 {to_yuan(wallet.balance)} 元")
     wallet.balance += amount
     db.add(OperationLog(
         user_id=operator.id,

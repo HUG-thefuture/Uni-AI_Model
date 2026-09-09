@@ -20,7 +20,7 @@ from ..models.ai_task import AiTask
 from ..models.model import Model
 from ..providers.exceptions import ProviderError
 from ..providers.factory import get_provider
-from ..services import billing
+from ..services import billing, pricing
 
 logger = logging.getLogger("app.task")
 
@@ -48,8 +48,11 @@ def _fail_task(db, task: AiTask | None, message: str, start: float) -> None:
     if task is None:
         return
     try:
-        if task.cost_status == "frozen" and task.cost:
-            billing.refund(db, task.user_id, task.cost, task_id=task.id)
+        if task.cost_status == "frozen":
+            frozen = task.frozen_cost or task.cost or 0
+            if frozen:
+                billing.refund(db, task.user_id, frozen, task_id=task.id, model_id=task.model_id)
+            task.frozen_cost = 0
             task.cost_status = "refunded"
             task.cost = 0
         task.status = "failed"
@@ -84,6 +87,18 @@ async def _poll_video_result(provider, model, handle: dict) -> list[str]:
     raise ProviderError("provider_timeout", "视频生成超时,本次不扣费")
 
 
+def _record_task_usage(task: AiTask, prompt_tokens: int | None,
+                       completion_tokens: int | None) -> tuple[int, int] | None:
+    """把本次调用的 token 用量记到任务上(媒体任务的输入为提示词估算,输出为媒体不计 token)。"""
+    if prompt_tokens is None and completion_tokens is None:
+        return None
+    p = max(0, int(prompt_tokens or 0))
+    c = max(0, int(completion_tokens or 0))
+    task.prompt_tokens = p
+    task.completion_tokens = c
+    return p, c
+
+
 def _load_and_start(db, task_id: int) -> tuple[AiTask | None, Model | None, dict]:
     """加载任务/模型并置 processing(线程池内执行,不阻塞事件循环)。"""
     task = db.get(AiTask, task_id)
@@ -101,9 +116,41 @@ def _load_and_start(db, task_id: int) -> tuple[AiTask | None, Model | None, dict
     return task, model, params
 
 
+def _actual_quantity(task: AiTask) -> int:
+    """按次任务的结算数量:图像=实际产出张数(result_url JSON 列表长度),其余=1。
+
+    对齐官方计费公式「费用=单价×张数」(阿里云百炼文生图 API 口径)。
+    """
+    if (task.task_type or "") != "image":
+        return 1
+    if not task.result_url:
+        return 1
+    try:
+        urls = json.loads(task.result_url)
+        return max(1, len(urls)) if isinstance(urls, list) else 1
+    except ValueError:
+        return 1
+
+
 def _finalize_success(db, task: AiTask, model: Model, start: float) -> None:
-    """成功收尾:结算 + status=succeeded(线程池内执行)。"""
-    billing.settle(db, task.user_id, task.cost, task_id=task.id, model_id=model.id)
+    """成功收尾:按实际用量结算 + status=succeeded(线程池内执行)。
+
+    - per_token:按真实 token 用量结算(多退少不补);
+    - per_call:按实际产出数量(图像张数/视频条数)× 售价单价结算;
+    两者统一走 settle_usage(冻结额与实际费用的差额自动退回/补扣)。
+    """
+    frozen = task.frozen_cost or task.cost or 0
+    if pricing.is_per_token(model):
+        actual_micro = pricing.cost_micro(
+            model, task.prompt_tokens or 0, task.completion_tokens or 0
+        ) or 0
+    else:
+        actual_micro = pricing.per_call_sell_micro(model, _actual_quantity(task))
+    cost = billing.settle_usage(
+        db, task.user_id, frozen=frozen, actual_micro=actual_micro,
+        task_id=task.id, model_id=model.id,
+    )
+    task.cost = cost
     task.cost_status = "settled"
     task.status = "succeeded"
     task.error_message = None
@@ -125,6 +172,7 @@ async def run_async_task(task_id: int) -> None:
     provider = None
     success = False
     error_code: str | None = None
+    token_usage: tuple[int, int] | None = None
     try:
         task, model, params = _load_and_start(db, task_id)
         if task is None:
@@ -144,6 +192,8 @@ async def run_async_task(task_id: int) -> None:
             if not urls and result.get("image_url"):
                 urls = [result["image_url"]]
             task.result_url = json.dumps(urls, ensure_ascii=False)
+            # 用量统计:输入为提示词估算 token,输出是媒体文件不计 token
+            token_usage = _record_task_usage(task, pricing.estimate_tokens(task.prompt), 0)
         elif task_type == "text":
             # 兜底通路(正常文本走 SSE 流式,不经此执行器):非流式一次取全
             result = await asyncio.wait_for(
@@ -153,6 +203,12 @@ async def run_async_task(task_id: int) -> None:
                 timeout=get_settings().read_timeouts.get("text", 60),
             )
             task.result_text = result.get("content", "")
+            usage = result.get("usage") or {}
+            token_usage = _record_task_usage(
+                task,
+                int(usage.get("prompt_tokens") or pricing.estimate_tokens(task.prompt)),
+                int(usage.get("completion_tokens") or pricing.estimate_tokens(task.result_text)),
+            )
         elif task_type == "audio_clone":
             # 声音克隆:params_json 提供 voice_name/text,成功取 audio_url 落 result_url
             result = await asyncio.wait_for(
@@ -163,6 +219,10 @@ async def run_async_task(task_id: int) -> None:
             if not audio_url:
                 raise ProviderError("provider_bad_response", "声音服务未返回音频地址")
             task.result_url = audio_url
+            # 合成文本是本任务的文字输入;产出的音频不计 token
+            token_usage = _record_task_usage(
+                task, pricing.estimate_tokens(params.get("text") or ""), 0
+            )
         elif task_type == "asr":
             # 语音识别:params_json.audio_url(可来自 /uploads),成功取 text 落 result_text
             audio_url = params.get("audio_url") or task.prompt or ""
@@ -171,6 +231,8 @@ async def run_async_task(task_id: int) -> None:
                 timeout=get_settings().read_timeouts.get("audio", 300),
             )
             task.result_text = result.get("text", "")
+            # 输入是音频不计 token,识别出的文本计为输出 token
+            token_usage = _record_task_usage(task, 0, pricing.estimate_tokens(task.result_text))
         elif task_type == "video":
             # 长文本转视频:先拿任务句柄;completed 直接取 video_url,
             # processing 则按 video_poll_interval_sec 轮询至 video_poll_max_sec(超时判 failed 不扣费)
@@ -185,6 +247,8 @@ async def run_async_task(task_id: int) -> None:
                 task.result_url = json.dumps(
                     await _poll_video_result(provider, model, handle), ensure_ascii=False
                 )
+            # 用量统计:输入为提示词估算 token,输出是视频文件不计 token
+            token_usage = _record_task_usage(task, pricing.estimate_tokens(task.prompt), 0)
         else:
             raise ProviderError("not_implemented", "该任务类型暂未开放,请等待后续版本")
 
@@ -215,6 +279,9 @@ async def run_async_task(task_id: int) -> None:
                     provider=getattr(provider, "vendor", "unknown") if provider else "unknown",
                     latency_ms=int((time.monotonic() - start) * 1000),
                     success=success, error_code=error_code,
+                    prompt_tokens=token_usage[0] if token_usage else None,
+                    completion_tokens=token_usage[1] if token_usage else None,
+                    total_tokens=sum(token_usage) if token_usage else None,
                 ))
                 db.commit()
         except Exception:  # noqa: BLE001 日志失败不影响主流程
@@ -244,6 +311,8 @@ def task_to_item(task: AiTask) -> dict:
         "result_url": task.result_url,
         "error_message": task.error_message,
         "cost": task.cost,
+        "prompt_tokens": task.prompt_tokens,
+        "completion_tokens": task.completion_tokens,
         "latency_ms": task.latency_ms,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }

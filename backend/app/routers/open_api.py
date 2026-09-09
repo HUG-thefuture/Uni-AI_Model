@@ -30,7 +30,7 @@ from ..models.ai_task import AiTask
 from ..models.model import Model
 from ..models.support import ApiUsageLog, User
 from ..providers.factory import get_provider
-from ..services import billing
+from ..services import billing, pricing
 from ..services.rate_limiter import rate_limiter
 
 logger = logging.getLogger("app.openapi")
@@ -61,8 +61,8 @@ def _sse(payload: dict) -> str:
 
 
 def _estimate_tokens(text: str) -> int:
-    """无 usage 时按字符数粗略估算(中英混合约 2 字符/token)。"""
-    return max(1, len(text or "") // 2)
+    """无 usage 时按字符数粗略估算(中英混合约 2 字符/token);口径统一到 pricing。"""
+    return pricing.estimate_tokens(text)
 
 
 def _build_params(body: OpenAIChatBody) -> dict:
@@ -75,13 +75,17 @@ def _build_params(body: OpenAIChatBody) -> dict:
 
 
 def _write_call_log(db: Session, *, request_id: str, user_id: int | None, model_id: int | None,
-                    vendor: str, start: float, success: bool, error_code: str | None) -> None:
+                    vendor: str, start: float, success: bool, error_code: str | None,
+                    prompt_tokens: int | None = None, completion_tokens: int | None = None) -> None:
     """ai_call_logs 落库:失败不影响主流程。"""
     try:
         db.add(AiCallLog(
             request_id=request_id, user_id=user_id, model_id=model_id, provider=vendor,
             latency_ms=int((time.monotonic() - start) * 1000), success=success,
             error_code=error_code,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            total_tokens=(prompt_tokens + completion_tokens)
+            if prompt_tokens is not None and completion_tokens is not None else None,
         ))
         db.commit()
     except Exception:  # noqa: BLE001
@@ -107,8 +111,11 @@ def _mark_task_failed(db: Session, task: AiTask | None, user_id: int, cost: int,
                       error_message: str) -> None:
     """失败释放:冻结退回、任务 failed(cost=0、cost_status=refunded)。"""
     if task is not None:
-        if task.cost_status == "frozen" and cost:
-            billing.refund(db, user_id, cost, task_id=task.id)
+        if task.cost_status == "frozen":
+            frozen = task.frozen_cost or cost or 0
+            if frozen:
+                billing.refund(db, user_id, frozen, task_id=task.id, model_id=task.model_id)
+            task.frozen_cost = 0
             task.cost = 0
             task.cost_status = "refunded"
         task.status = "failed"
@@ -127,36 +134,48 @@ def _get_text_model_by_code(db: Session, model_code: str) -> Model:
 
 
 def _create_openai_task(db: Session, *, request_id: str, user_id: int, model: Model,
-                        prompt: str, params: dict, cost: int) -> AiTask:
+                        prompt: str, params: dict, frozen: int) -> AiTask:
     """建任务 + 预扣冻结(freeze 失败抛 409 时任务未提交,自动丢弃)。"""
     task = AiTask(
         request_id=request_id, user_id=user_id, model_id=model.id, task_type="text",
         prompt=prompt, params_json=json.dumps(params, ensure_ascii=False) if params else None,
-        status="processing", cost_status="frozen", cost=cost,
+        status="processing", cost_status="frozen", cost=frozen, frozen_cost=frozen,
     )
     db.add(task)
     db.flush()
-    billing.freeze(db, user_id, cost, task_id=task.id)
+    billing.freeze(db, user_id, frozen, task_id=task.id)
     db.commit()
     return task
 
 
 def _finish_success(db: Session, *, task: AiTask, key_id: int, api_key_id: int | None,
                     path: str, model: Model, vendor: str, request_id: str,
-                    start: float, content: str, cost: int) -> None:
-    """成功结算:任务 succeeded + settle + ai_call_logs/api_usage_logs 落库。"""
+                    start: float, content: str, frozen: int,
+                    prompt_tokens: int, completion_tokens: int) -> int:
+    """成功结算:任务 succeeded + 按实际用量结算 + 日志落库;返回最终结算积分。"""
     latency_ms = int((time.monotonic() - start) * 1000)
+    actual_micro = pricing.cost_micro(model, prompt_tokens, completion_tokens)
+    if actual_micro is None:
+        cost = pricing.per_call_sell_micro(model)
+        billing.settle(db, key_id, cost, task_id=task.id, model_id=model.id)
+    else:
+        cost = billing.settle_usage(db, key_id, frozen=frozen, actual_micro=actual_micro,
+                                    task_id=task.id, model_id=model.id)
     task.status = "succeeded"
     task.result_text = content
     task.cost_status = "settled"
+    task.cost = cost
+    task.frozen_cost = frozen
+    task.prompt_tokens = prompt_tokens
+    task.completion_tokens = completion_tokens
     task.latency_ms = latency_ms
     db.commit()
-    billing.settle(db, key_id, cost, task_id=task.id, model_id=model.id)
-    db.commit()
     _write_call_log(db, request_id=request_id, user_id=key_id, model_id=model.id,
-                    vendor=vendor, start=start, success=True, error_code=None)
+                    vendor=vendor, start=start, success=True, error_code=None,
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
     _write_usage_log(db, key_id=api_key_id, user_id=key_id, path=path,
                      model_id=model.id, status_code=200, latency_ms=latency_ms)
+    return cost
 
 
 def _finish_failure(db: Session, *, task_id: int, key_id: int, api_key_id: int | None,
@@ -211,14 +230,16 @@ async def chat_completions(
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
     prompt = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
     params = _build_params(body)
-    cost = int(model.price_per_call or 0)
+    # 预扣冻结:按 token 计费按输入估算+输出封顶,按次取 price_per_call
+    prompt_chars = sum(len(m["content"] or "") for m in messages)
+    frozen = pricing.freeze_amount(model, prompt_chars)
     request_id = current_request_id()
     chatcmpl_id = f"chatcmpl-{request_id}"
     start = time.monotonic()
 
     task = await run_db(
         _create_openai_task, db, request_id=request_id, user_id=key.id,
-        model=model, prompt=prompt, params=params, cost=cost,
+        model=model, prompt=prompt, params=params, frozen=frozen,
     )
 
     # ---------- 非流式 ----------
@@ -237,21 +258,22 @@ async def chat_completions(
                 _finish_failure, db, task_id=task.id, key_id=key.id,
                 api_key_id=request.state.api_key_id, path=request.url.path,
                 model_id=model.id, vendor=provider.vendor, request_id=request_id,
-                start=start, cost=cost, message=message, error_code=str(error_code),
+                start=start, cost=frozen, message=message, error_code=str(error_code),
             )
             raise APIError(502, "生成失败,本次不扣费")
 
         content = result["content"]
         usage = result.get("usage") or {}
-        prompt_tokens = int(usage.get("prompt_tokens") or _estimate_tokens(prompt))
+        prompt_tokens = int(usage.get("prompt_tokens") or _estimate_tokens(
+            "".join(m["content"] or "" for m in messages)))
         completion_tokens = int(usage.get("completion_tokens") or _estimate_tokens(content))
-        latency_ms = int((time.monotonic() - start) * 1000)
 
-        await run_db(
+        settled_cost = await run_db(
             _finish_success, db, task=task, key_id=key.id,
             api_key_id=request.state.api_key_id, path=request.url.path,
             model=model, vendor=provider.vendor, request_id=request_id,
-            start=start, content=content, cost=cost,
+            start=start, content=content, frozen=frozen,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
         )
         return {
             "id": chatcmpl_id,
@@ -282,6 +304,7 @@ async def chat_completions(
         usage: dict = {}
         success = False
         error_code: str | None = None
+        prompt_tokens = completion_tokens = None
         try:
             async with asyncio.timeout(get_settings().sse_total_timeout):
                 async for chunk in provider.generate_text(model, messages, params):
@@ -298,24 +321,33 @@ async def chat_completions(
                         })
 
             text = "".join(reply)
+            prompt_tokens = int(usage.get("prompt_tokens") or _estimate_tokens(
+                "".join(m["content"] or "" for m in messages)))
+            completion_tokens = int(usage.get("completion_tokens") or _estimate_tokens(text))
             stask = await run_db(sdb.get, AiTask, task.id)
             await run_db(
                 _finish_success, sdb, task=stask, key_id=key.id,
                 api_key_id=request.state.api_key_id, path=request.url.path,
                 model=model, vendor=provider.vendor, request_id=request_id,
-                start=gen_start, content=text, cost=cost,
+                start=gen_start, content=text, frozen=frozen,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
             )
             success = True
             yield _sse({
                 "id": chatcmpl_id, "object": "chat.completion.chunk",
                 "model": model.model_code,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                },
             })
             yield "data: [DONE]\n\n"
         except (asyncio.CancelledError, GeneratorExit):
             # 客户端断连:按失败处理(不扣费),不可再 yield;
             # 取消路径内不再 await(二次取消会丢失收尾),保持同步直调
-            _mark_task_failed(sdb, sdb.get(AiTask, task.id), key.id, cost, "生成中断,本次不扣费")
+            _mark_task_failed(sdb, sdb.get(AiTask, task.id), key.id, frozen, "生成中断,本次不扣费")
             _write_call_log(sdb, request_id=request_id, user_id=key.id, model_id=model.id,
                             vendor=provider.vendor, start=gen_start, success=False,
                             error_code="client_disconnected")
@@ -333,7 +365,7 @@ async def chat_completions(
                 _finish_failure, sdb, task_id=task.id, key_id=key.id,
                 api_key_id=request.state.api_key_id, path=request.url.path,
                 model_id=model.id, vendor=provider.vendor, request_id=request_id,
-                start=gen_start, cost=cost, message=message, error_code=error_code,
+                start=gen_start, cost=frozen, message=message, error_code=error_code,
             )
             yield _sse({"error": {"message": "生成失败,本次不扣费"}})
             yield "data: [DONE]\n\n"

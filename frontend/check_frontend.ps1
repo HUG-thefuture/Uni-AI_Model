@@ -55,9 +55,10 @@ try {
   $appScript = Get-Content -LiteralPath (Join-Path $frontend 'js/app.js') -Raw
   $profilePersists = $appScript.Contains('window.PortalApi.updateProfile(')
   Add-Result 'profile_persistence_call' $profilePersists $(if ($profilePersists) { 'Profile form calls the real update API' } else { 'Profile form does not call PortalApi.updateProfile' })
+  $audioUsesRealApis = $appScript.Contains("/api/tasks/audio/clone") -and $appScript.Contains("/api/tasks/audio/asr")
   $realModeGuard = $appScript.Contains('真实创作接口尚未接入') -and
     $appScript.Contains("state.busy.image || !window.PortalConfig.demoMode") -and
-    $appScript.Contains("state.busy.audio || !window.PortalConfig.demoMode") -and
+    ($appScript.Contains("state.busy.audio || !window.PortalConfig.demoMode") -or $audioUsesRealApis) -and
     $appScript.Contains("state.busy.video || !window.PortalConfig.demoMode") -and
     ($appScript.Contains("if (!record) { state.busy.image = false; return; }") -or $appScript.Contains("window.PortalApi.task('image'"))
   Add-Result 'real_mode_no_fake_actions' $realModeGuard $(if ($realModeGuard) { 'Real mode blocks fake paths and uses real task APIs' } else { 'Real mode fake task guard is missing' })

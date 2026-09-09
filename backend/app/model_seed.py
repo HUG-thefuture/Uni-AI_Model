@@ -26,18 +26,31 @@ DEFAULT_TEMPLATE_PATH = TEMPLATE_DIR / "model-config-template.json"
 # 模板条目中需要同步到 models 表的字段(跳过 "_说明" 等下划线开头键)
 SEED_FIELDS = (
     "name", "model_code", "provider_type", "model_type", "vendor", "endpoint",
-    "price_per_call", "max_duration_sec", "status", "config_json",
+    "price_per_call", "billing_mode", "token_input_price", "token_output_price",
+    "max_duration_sec", "status", "config_json",
     "description", "capability_tags",
 )
+
+
+# 计费字段缺省值(旧模板没有这些键;显式 None 会违反 NOT NULL 约束)
+_BILLING_DEFAULTS = {
+    "billing_mode": "per_call",
+    "token_input_price": 0,
+    "token_output_price": 0,
+}
 
 
 def load_template(path: Path) -> list[dict]:
     """读取单个模板 JSON,返回模型条目列表(忽略下划线开头的说明键)。"""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return [
+    items = [
         item for item in data.get("models", [])
         if isinstance(item, dict) and item.get("model_code")
     ]
+    for item in items:
+        for key, default in _BILLING_DEFAULTS.items():
+            item.setdefault(key, default)
+    return items
 
 
 def load_templates(template_dir: Path | None = None) -> tuple[list[dict], list[str]]:

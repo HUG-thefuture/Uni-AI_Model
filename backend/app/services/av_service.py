@@ -21,7 +21,7 @@ from ..core.response import APIError
 from ..models.ai_task import AiTask
 from ..models.model import Model
 from ..models.support import User
-from ..services import billing
+from ..services import billing, pricing
 
 # ---------- 上传常量 ----------
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
@@ -120,12 +120,14 @@ def submit_av_task(db: Session, user: User, model: Model, task_type: str,
     if dup is not None:
         raise APIError(409, "请勿重复提交")
     check_duration(params, model)
-    billing.freeze(db, user.id, model.price_per_call)  # 余额不足 409「积分不足,请先充值」
+    frozen = pricing.per_call_sell_micro(model)  # 视频=元/条,音频=元/次,已含加价
+    billing.freeze(db, user.id, frozen)  # 余额不足 409「余额不足,请先充值」
     task = AiTask(
         request_id=current_request_id(), user_id=user.id, model_id=model.id,
         task_type=task_type, prompt=prompt,
         params_json=json.dumps(params, ensure_ascii=False),
-        status="pending", cost_status="frozen", cost=model.price_per_call,
+        status="pending", cost_status="frozen", cost=frozen,
+        frozen_cost=frozen,
     )
     db.add(task)
     db.commit()

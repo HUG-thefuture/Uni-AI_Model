@@ -57,7 +57,7 @@ class OpenAICompatProvider(BaseProvider):
             "stream": True,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
-        client, resp = await self._open_stream_with_retry(
+        resp = await self._open_stream_with_retry(
             f"{self._base_url(model)}/chat/completions",
             headers=self._headers(model),
             json_body=body,
@@ -83,8 +83,7 @@ class OpenAICompatProvider(BaseProvider):
                         yield {"delta": delta}
             yield {"done": True, "usage": usage}
         finally:
-            await resp.aclose()
-            await client.aclose()
+            await resp.aclose()  # 共享 client 归 http_client 单例管理,只关 resp
 
     async def generate_text_once(
         self, model, messages: list[dict], params: dict | None = None

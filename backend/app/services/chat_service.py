@@ -24,7 +24,7 @@ from ..models.model import Model
 from ..models.support import ChatMessage, ChatSession
 from ..providers.exceptions import ProviderError
 from ..providers.factory import get_provider
-from ..services import billing
+from ..services import billing, pricing
 
 logger = logging.getLogger("app.chat")
 
@@ -105,8 +105,8 @@ def add_user_message(db: Session, session: ChatSession, content: str, model_id: 
 
 
 def estimate_tokens(prompt: str, reply: str) -> int:
-    """无 usage 时按字符数粗略估算(中英混合约 2 字符/token)。"""
-    return max(1, (len(prompt) + len(reply)) // 2)
+    """无 usage 时按字符数粗略估算(中英混合约 2 字符/token);口径统一到 pricing。"""
+    return pricing.estimate_tokens((prompt or "") + (reply or ""))
 
 
 # ---------- SSE 流式文本回复 ----------
@@ -125,8 +125,11 @@ def _mark_text_failed(db: Session, task_id: int, user_id: int, exc: Exception, s
     task = db.get(AiTask, task_id)
     if task is None:
         return
-    if task.cost_status == "frozen" and task.cost:
-        billing.refund(db, user_id, task.cost, task_id=task_id)
+    if task.cost_status == "frozen":
+        frozen = task.frozen_cost or task.cost or 0
+        if frozen:
+            billing.refund(db, user_id, frozen, task_id=task_id, model_id=task.model_id)
+        task.frozen_cost = 0
         task.cost = 0
         task.cost_status = "refunded"
     task.status = "failed"
@@ -139,13 +142,17 @@ def _mark_text_failed(db: Session, task_id: int, user_id: int, exc: Exception, s
 
 
 def _write_call_log(db: Session, *, request_id: str, user_id: int, model, provider,
-                    start: float, success: bool, error_code: str | None) -> None:
+                    start: float, success: bool, error_code: str | None,
+                    prompt_tokens: int | None = None, completion_tokens: int | None = None) -> None:
     try:
         db.add(AiCallLog(
             request_id=request_id, user_id=user_id, model_id=getattr(model, "id", None),
             provider=getattr(provider, "vendor", "unknown"),
             latency_ms=int((time.monotonic() - start) * 1000),
             success=success, error_code=error_code,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            total_tokens=(prompt_tokens + completion_tokens)
+            if prompt_tokens is not None and completion_tokens is not None else None,
         ))
         db.commit()
     except Exception:  # noqa: BLE001 日志失败不影响主流程
@@ -153,30 +160,48 @@ def _write_call_log(db: Session, *, request_id: str, user_id: int, model, provid
         logger.exception("ai_call_logs 落库失败(request_id=%s)", request_id)
 
 
-def _persist_reply(db: Session, *, session_id: int, model, text: str, tokens: int,
-                   task_id: int, user_id: int, cost: int, start: float) -> None:
-    """成功收尾:写 assistant 消息 + 任务 succeeded + settle(线程池内执行)。"""
+def _persist_reply(db: Session, *, session_id: int, model, text: str,
+                   prompt_tokens: int, completion_tokens: int,
+                   task_id: int, user_id: int, frozen: int, start: float) -> int:
+    """成功收尾:写 assistant 消息 + 任务 succeeded + 按实际用量结算(线程池内执行)。
+
+    返回最终结算金额(微元;按 token 计费为实际费用,按次计费为单价),供 done 事件换算元展示。
+    """
+    total_tokens = prompt_tokens + completion_tokens
     db.add(ChatMessage(session_id=session_id, role="assistant", content=text,
-                       model_id=model.id, tokens_used=tokens))
+                       model_id=model.id, tokens_used=total_tokens))
     task = db.get(AiTask, task_id)
+    actual_micro = pricing.cost_micro(model, prompt_tokens, completion_tokens)
+    if actual_micro is None:
+        # 按次计费:结算售价单价(成本×加价,微元)
+        cost = pricing.per_call_sell_micro(model)
+        billing.settle(db, user_id, cost, task_id=task_id, model_id=model.id)
+    else:
+        # 按 token 计费:实际结算,多退少不补,尾差进累积器
+        cost = billing.settle_usage(db, user_id, frozen=frozen, actual_micro=actual_micro,
+                                    task_id=task_id, model_id=model.id)
     if task is not None:
         task.status = "succeeded"
         task.result_text = text
         task.cost_status = "settled"
+        task.cost = cost
+        task.frozen_cost = frozen
+        task.prompt_tokens = prompt_tokens
+        task.completion_tokens = completion_tokens
         task.latency_ms = int((time.monotonic() - start) * 1000)
     db.commit()
-    billing.settle(db, user_id, cost, task_id=task_id, model_id=model.id)
-    db.commit()
+    return cost
 
 
 async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: int,
-                            cost: int, request_id: str, prompt: str) -> AsyncIterator[str]:
+                            frozen: int, request_id: str, prompt: str) -> AsyncIterator[str]:
     """SSE 流式回复生成器(建流前的校验/冻结/建任务已由路由完成)。
 
     事件:
     - data: {"delta": "..."}          逐段增量(直接透传 Provider);
-    - data: {"done": true, "task_id": N, "cost": N}  正常结束(已结算);
+    - data: {"done": true, "task_id": N, "cost": N, "tokens": N}  正常结束(已按实际用量结算);
     - data: {"error": {"code": "...", "message": "生成失败,本次不扣费"}}  失败结束(已退费)。
+    计费:按 token 模型按上游真实 usage 结算(缺失时估算),多退少不补;
     超时控制:首字节 sse_first_byte_timeout 秒,总时长 sse_total_timeout 秒。
     落库经 run_db 放线程池;断连(CancelledError/GeneratorExit)分支保持同步直调,
     避免二次取消丢失收尾。
@@ -190,6 +215,8 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
     usage: dict = {}
     success = False
     error_code: str | None = None
+    settled_cost: int | None = None
+    prompt_tokens = completion_tokens = None
     history = await run_db(recent_messages, db, session_id)
     stream = provider.generate_text(model, history).__aiter__()
     try:
@@ -214,11 +241,20 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
                 yield sse_frame({"delta": delta})
 
         text = "".join(reply)
-        tokens = int(usage.get("total_tokens") or estimate_tokens(prompt, text))
-        await run_db(_persist_reply, db, session_id=session_id, model=model, text=text,
-                     tokens=tokens, task_id=task_id, user_id=user_id, cost=cost, start=start)
+        history_chars = len(prompt) + sum(len(m.get("content") or "") for m in history)
+        prompt_tokens = int(usage.get("prompt_tokens") or pricing.estimate_tokens_from_chars(history_chars))
+        completion_tokens = int(usage.get("completion_tokens") or pricing.estimate_tokens(text))
+        settled_cost = await run_db(
+            _persist_reply, db, session_id=session_id, model=model, text=text,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            task_id=task_id, user_id=user_id, frozen=frozen, start=start,
+        )
         success = True
-        yield sse_frame({"done": True, "task_id": task_id, "cost": cost})
+        yield sse_frame({
+            "done": True, "task_id": task_id, "cost": pricing.to_yuan(settled_cost),
+            "tokens": prompt_tokens + completion_tokens,
+            "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+        })
     except (asyncio.CancelledError, GeneratorExit):
         # 客户端断连/任务被取消:按失败处理(不扣费),不可再 yield,清理后原样抛出;
         # 取消路径内不再 await(二次取消会丢失收尾),保持同步直调
@@ -236,7 +272,8 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
         yield sse_frame({"error": {"code": str(error_code), "message": message}})
     finally:
         _write_call_log(db, request_id=request_id, user_id=user_id, model=model,
-                        provider=provider, start=start, success=success, error_code=error_code)
+                        provider=provider, start=start, success=success, error_code=error_code,
+                        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
         try:
             await stream.aclose()
         except Exception:  # noqa: BLE001

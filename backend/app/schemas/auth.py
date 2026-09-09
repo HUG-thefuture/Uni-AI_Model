@@ -13,6 +13,7 @@ class User_out(BaseModel):
         """用户信息返回:永远不包含 password_hash。"""
         id: int
         username: str
+        phone: str | None = None
         role: str
         status: int
         real_auth_status: int

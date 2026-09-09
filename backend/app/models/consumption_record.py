@@ -24,7 +24,7 @@ class ConsumptionRecord(Base):
     task_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 ai_tasks.id")
     model_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="逻辑外键 models.id")
 
-    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="消费金额(分)")
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="变动金额(微元,1元=1000000)")
     balance_before: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="扣费前余额")
     balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="扣费后余额")
 

@@ -94,14 +94,19 @@ class BaseProvider(abc.ABC):
 
         validate(response) 用于把 4xx 等业务错误转换成 ProviderError;
         只有「请求未产生任何结果」的错误才值得重试。
+        复用进程级共享 AsyncClient(core/http_client),避免每次调用新建连接池。
         """
         s = get_settings()
         retries = max(0, s.provider_max_retries)
         last_exc: Exception | None = None
+        from ..core.http_client import get_http_client
+
+        client = get_http_client()
         for attempt in range(retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout(model_type)) as client:
-                    resp = await client.post(url, headers=headers, json=json_body)
+                resp = await client.post(
+                    url, headers=headers, json=json_body, timeout=self._timeout(model_type)
+                )
                 if validate:
                     validate(resp)  # 抛 ProviderError(不可重试类)或直接通过
                 if resp.status_code in _RETRYABLE_STATUS:
@@ -123,22 +128,26 @@ class BaseProvider(abc.ABC):
 
     async def _open_stream_with_retry(
         self, url: str, *, headers: dict, json_body: dict, model_type: str
-    ) -> tuple[httpx.AsyncClient, httpx.Response]:
+    ) -> httpx.Response:
         """流式 POST:仅重试「建立连接/拿到响应头」阶段;一旦开始收到增量不再重试。
 
-        返回 (client, resp) 二元组,resp 处于 streaming 状态;调用方结束后须依次
-        await resp.aclose() 与 await client.aclose()。
+        复用进程级共享 AsyncClient(core/http_client),返回处于 streaming 状态的
+        resp;调用方结束后只须 await resp.aclose()(共享 client 的生命周期归
+        http_client 单例管理,调用方不得关闭)。
         """
         s = get_settings()
         retries = max(0, s.provider_max_retries)
         last_exc: Exception | None = None
+        from ..core.http_client import get_http_client
+
+        client = get_http_client()
         for attempt in range(retries + 1):
-            client = httpx.AsyncClient(timeout=self._timeout(model_type))
             try:
-                resp = await client.send(
-                    client.build_request("POST", url, headers=headers, json=json_body),
-                    stream=True,
+                req = client.build_request(
+                    "POST", url, headers=headers, json=json_body,
+                    timeout=self._timeout(model_type),
                 )
+                resp = await client.send(req, stream=True)
                 if resp.status_code in _RETRYABLE_STATUS:
                     await resp.aclose()
                     raise httpx.HTTPStatusError(
@@ -147,14 +156,11 @@ class BaseProvider(abc.ABC):
                 if resp.status_code >= 400:
                     raw = (await resp.aread()).decode("utf-8", "replace")
                     await resp.aclose()
-                    await client.aclose()
                     raise self._map_http_error(resp.status_code, raw)
-                return client, resp  # 成功:client 生命周期交给调用方
+                return resp  # 成功:resp 生命周期交给调用方
             except ProviderError:
-                await client.aclose()
                 raise
             except Exception as exc:  # noqa: BLE001
-                await client.aclose()
                 last_exc = exc
                 if attempt < retries:
                     delay = 2 ** attempt

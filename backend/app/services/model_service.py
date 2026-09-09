@@ -19,12 +19,14 @@ from ..models.ai_call_log import AiCallLog
 from ..models.ai_task import AiTask
 from ..models.model import Model
 from ..models.support import OperationLog
+from . import pricing
 
 # 全组冻结的合法枚举值
 VALID_PROVIDER_TYPES = ("online", "local")
 VALID_MODEL_TYPES = ("text", "image", "audio", "video")
 VALID_VENDORS = ("siliconflow", "dashscope", "ollama", "mock")
 VALID_STATUSES = ("enabled", "disabled")
+VALID_BILLING_MODES = ("per_call", "per_token")
 
 # vendor 与 provider_type 的对应关系(与实际生产环境对齐):
 # - siliconflow / dashscope / mock 为云端(online)供应商;
@@ -47,6 +49,7 @@ def _validate_enums(
     provider_type: str | None = None,
     model_type: str | None = None,
     vendor: str | None = None,
+    billing_mode: str | None = None,
 ) -> None:
     """枚举合法性校验,非法返回 400(中文提示)。
 
@@ -57,6 +60,8 @@ def _validate_enums(
         raise APIError(400, "provider_type 非法,仅支持 online/local")
     if model_type is not None and model_type not in VALID_MODEL_TYPES:
         raise APIError(400, "model_type 非法,仅支持 text/image/audio/video")
+    if billing_mode is not None and billing_mode not in VALID_BILLING_MODES:
+        raise APIError(400, "billing_mode 非法,仅支持 per_call/per_token")
     # 内置 vendor 与 provider_type 必须匹配(生产环境约束)
     if vendor is not None and provider_type is not None and vendor in VENDOR_PROVIDER_TYPE:
         expected = VENDOR_PROVIDER_TYPE[vendor]
@@ -123,16 +128,27 @@ def _model_available(model: Model) -> bool:
 
 
 def model_to_portal(model: Model) -> dict:
-    """门户端条目:不含 endpoint 与 config_json,不暴露调用细节;available 为在线状态。"""
+    """门户端条目:不含 endpoint 与 config_json,不暴露调用细节;available 为在线状态。
+
+    model_code(厂商调用名)对门户可见:开放平台按 model_code 调用,便于用户复制接入。
+    token_input_price/token_output_price 返回的是「用户售价」(成本 × 加价),成本价不对门户暴露;
+    price_per_call 同样返回售价(成本单价 × 加价,元/张·条·次)。
+    """
+    sell_in, sell_out = pricing.sell_prices(model)
+    sell_per_call = round(float(model.price_per_call or 0) * pricing.markup_pct(model) / 100, 4)
     return {
         "id": model.id,
         "name": model.name,
+        "model_code": model.model_code,
         "vendor": model.vendor,
         "provider_type": model.provider_type,
         "model_type": model.model_type,
         "description": model.description,
         "capability_tags": model.capability_tags,
-        "price_per_call": model.price_per_call,
+        "price_per_call": sell_per_call,
+        "billing_mode": getattr(model, "billing_mode", "per_call"),
+        "token_input_price": sell_in,
+        "token_output_price": sell_out,
         "status": model.status,
         "available": _model_available(model),
     }
@@ -148,7 +164,14 @@ def _mask_api_key(key: str | None) -> str | None:
 
 
 def model_to_admin(model: Model) -> dict:
-    """管理端条目:全量字段,config_json 解析为对象输出;api_key 脱敏返回。"""
+    """管理端条目:全量字段,config_json 解析为对象输出;api_key 脱敏返回。
+
+    token_input_price/token_output_price 为「供应商成本价」,token_markup_pct 为加价比例;
+    用户售价 = 成本 × 加价(pricing.sell_prices),管理端同步给出便于核对。
+    price_per_call 为按次成本单价(元/张·条·次),sell_price_per_call 为对应售价。
+    """
+    sell_in, sell_out = pricing.sell_prices(model)
+    sell_per_call = round(float(model.price_per_call or 0) * pricing.markup_pct(model) / 100, 4)
     return {
         "id": model.id,
         "name": model.name,
@@ -158,7 +181,14 @@ def model_to_admin(model: Model) -> dict:
         "vendor": model.vendor,
         "endpoint": model.endpoint,
         "api_key": _mask_api_key(model.api_key),
-        "price_per_call": model.price_per_call,
+        "price_per_call": float(model.price_per_call or 0),
+        "sell_price_per_call": sell_per_call,
+        "billing_mode": getattr(model, "billing_mode", "per_call"),
+        "token_input_price": getattr(model, "token_input_price", 0),
+        "token_output_price": getattr(model, "token_output_price", 0),
+        "token_markup_pct": getattr(model, "token_markup_pct", None),
+        "sell_input_price": sell_in,
+        "sell_output_price": sell_out,
         "max_duration_sec": model.max_duration_sec,
         "status": model.status,
         "config_json": _parse_config_json(model.config_json),
@@ -250,7 +280,7 @@ def list_admin_models(
 def create_model(db: Session, user_id: int, payload) -> Model:
     """创建模型:枚举校验 + 自定义/本地供应商配置校验 + 唯一校验 + 写操作日志。"""
     _validate_enums(provider_type=payload.provider_type, model_type=payload.model_type,
-                    vendor=payload.vendor)
+                    vendor=payload.vendor, billing_mode=payload.billing_mode)
     # 自定义供应商(不在内置映射中):必须 online 且配置 endpoint(base_url) 与 api_key
     if payload.vendor not in VENDOR_PROVIDER_TYPE:
         if payload.provider_type != "online":
@@ -271,6 +301,10 @@ def create_model(db: Session, user_id: int, payload) -> Model:
         endpoint=payload.endpoint,
         api_key=payload.api_key,
         price_per_call=payload.price_per_call,
+        billing_mode=payload.billing_mode,
+        token_input_price=payload.token_input_price,
+        token_output_price=payload.token_output_price,
+        token_markup_pct=payload.token_markup_pct,
         max_duration_sec=payload.max_duration_sec,
         description=payload.description,
         capability_tags=payload.capability_tags,
@@ -301,7 +335,8 @@ def update_model(db: Session, user_id: int, model_id: int, payload) -> Model:
     provided = payload.model_dump(exclude_unset=True)
     _validate_enums(provider_type=provided.get("provider_type"),
                     model_type=provided.get("model_type"),
-                    vendor=provided.get("vendor"))
+                    vendor=provided.get("vendor"),
+                    billing_mode=provided.get("billing_mode"))
     if "config_json" in provided:
         provided["config_json"] = _normalize_config_json(provided["config_json"])
     else:

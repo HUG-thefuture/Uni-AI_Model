@@ -13,6 +13,7 @@ from ..models import User
 from .db import get_async_db
 from .response import APIError
 from .security import decode_token
+from .token_blacklist import is_revoked
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -31,6 +32,8 @@ async def get_current_user(
         payload = decode_token(creds.credentials)
         user_id = int(payload["sub"])
     except (pyjwt.PyJWTError, KeyError, TypeError, ValueError):
+        raise _credentials_error()
+    if is_revoked(creds.credentials):  # 登出拉黑的 token 立即失效
         raise _credentials_error()
     user = await db.get(User, user_id)
     if user is None or user.status != 1:  # 禁用立即失效

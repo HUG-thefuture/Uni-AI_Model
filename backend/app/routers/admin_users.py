@@ -13,6 +13,7 @@ from ..schemas.user import (
     StatusUpdateIn,
 )
 from ..services import user as user_service
+from ..services.pricing import to_yuan
 
 router = APIRouter(prefix="/admin/users", tags=["管理端-用户"])
 
@@ -24,8 +25,8 @@ async def list_users(
     keyword: str | None = Query(None, max_length=50),
     role: str | None = Query(None, pattern="^(user|admin)$"),
     status: int | None = Query(None, ge=-1, le=1),
-    balance_min: int | None = Query(None, description="余额下限(分)"),
-    balance_max: int | None = Query(None, description="余额上限(分)"),
+    balance_min: float | None = Query(None, description="余额下限(元)"),
+    balance_max: float | None = Query(None, description="余额上限(元)"),
     include_deleted: int = Query(0, ge=0, le=1, description="1 时包含软删除用户"),
     current: User = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
@@ -81,9 +82,9 @@ async def adjust_balance(
     current: User = Depends(require_admin),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """余额调整:amount 正数充值/补发,负数扣减/回收(分为单位)。"""
+    """余额调整:amount 正数充值/补发,负数扣减/回收(元为单位)。"""
     wallet = await user_service.adjust_balance(db, user_id, payload.amount, payload.reason, current)
-    return ok({"user_id": wallet.user_id, "balance": wallet.balance})
+    return ok({"user_id": wallet.user_id, "balance": to_yuan(wallet.balance)})
 
 
 @router.put("/{user_id}/password")

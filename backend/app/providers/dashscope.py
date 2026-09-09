@@ -35,6 +35,8 @@ NATIVE_BASE = "https://dashscope.aliyuncs.com/api/v1"
 
 # 文生图异步提交/查询
 IMAGE_SUBMIT_URL = f"{NATIVE_BASE}/services/aigc/text2image/image-synthesis"
+# 图生图(通义万相 image2image,异步提交 + 轮询)
+IMAGE2IMAGE_SUBMIT_URL = f"{NATIVE_BASE}/services/aigc/image2image/image-synthesis"
 TASK_QUERY_URL = f"{NATIVE_BASE}/tasks"
 # 语音合成(qwen-tts,原协议)
 TTS_URL = f"{NATIVE_BASE}/services/aigc/multimodal-generation/generation"
@@ -57,14 +59,17 @@ class DashScopeProvider(BaseProvider):
         return h
 
     async def _get_json(self, url: str, model_type: str) -> dict:
-        """GET 请求(带重试),用于查询异步任务状态;返回解析后的 JSON。"""
+        """GET 请求(带重试),用于查询异步任务状态;返回解析后的 JSON。
+        复用进程级共享 AsyncClient(core/http_client)。"""
+        from ..core.http_client import get_http_client
+
         s = get_settings()
         retries = max(0, s.provider_max_retries)
         last_exc: Exception | None = None
+        client = get_http_client()
         for attempt in range(retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout(model_type)) as client:
-                    resp = await client.get(url, headers=self._headers())
+                resp = await client.get(url, headers=self._headers(), timeout=self._timeout(model_type))
                 if resp.status_code >= 400:
                     raise self._map_http_error(resp.status_code, resp.text)
                 return resp.json()
@@ -88,7 +93,7 @@ class DashScopeProvider(BaseProvider):
             "stream": True,
             **self.model_params(model, {"temperature": 0.7, "max_tokens": 1024}),
         }
-        client, resp = await self._open_stream_with_retry(
+        resp = await self._open_stream_with_retry(
             f"{OPENAI_BASE}/chat/completions",
             headers=self._headers(),
             json_body=body,
@@ -115,8 +120,7 @@ class DashScopeProvider(BaseProvider):
                         yield {"delta": delta}
             yield {"done": True, "usage": usage}
         finally:
-            await resp.aclose()
-            await client.aclose()
+            await resp.aclose()  # 共享 client 归 http_client 单例管理,只关 resp
 
     async def generate_text_once(
         self, model, messages: list[dict], params: dict | None = None
@@ -161,16 +165,21 @@ class DashScopeProvider(BaseProvider):
     # ---------- 文生图(wanx 异步提交 + 轮询) ----------
 
     async def generate_image(self, model, prompt: str, params: dict | None = None) -> dict:
-        """文生图:异步提交 wanx 任务,内部轮询至 SUCCEEDED 后返回 {"image_urls": [...]}。
+        """文生图/图生图:异步提交 wanx 任务,内部轮询至 SUCCEEDED 后返回 {"image_urls": [...]}。
 
         - 提交需 X-DashScope-Async: enable,返回 output.task_id;
         - GET /api/v1/tasks/{task_id} 轮询 task_status(SUCCEEDED / FAILED / PENDING / RUNNING);
-        - 结果图 URL 落到 upload_dir 本地化(OSS 签名 URL 会过期),返回 /static/<名>。
+        - 结果图 URL 落到 upload_dir 本地化(OSS 签名 URL 会过期),返回 /static/<名>;
+        - params 含 image_url 时走图生图原协议(_generate_image_to_image),否则文生图。
         """
+        params = params or {}
+        image_url = str(params.get("image_url") or "").strip()
+        if image_url:
+            return await self._generate_image_to_image(model, prompt, params, image_url)
+
         import base64
         import uuid as _uuid
 
-        params = params or {}
         try:
             n = int(params.get("num") or 1)
         except (TypeError, ValueError):
@@ -226,6 +235,58 @@ class DashScopeProvider(BaseProvider):
             raise ProviderError("provider_bad_response", "文生图服务未返回图像", json.dumps(data)[:500])
         return {"image_urls": urls, "raw": data}
 
+    async def _generate_image_to_image(self, model, prompt: str, params: dict, image_url: str) -> dict:
+        """图生图(通义万相 image2image 原协议):异步提交 + 复用轮询/落盘。
+
+        - body: {"model", "input": {"prompt", "base_image_url"}, "parameters": {"size"}};
+        - 仅 wanx-x2img / image2image 类模型支持;文生图(wanx/t2i)模型带参考图时
+          抛明确中文错误提示换模型;
+        - 轮询复用 _poll_image_task,结果复用 _download_image 落盘为 /static/ URL。
+        """
+        code = (getattr(model, "model_code", "") or "").lower()
+        if not ("image2image" in code or "x2img" in code):
+            if "t2i" in code or code.startswith("wanx"):
+                raise ProviderError(
+                    "invalid_params",
+                    "该模型为文生图模型，图生图请使用 wanx-x2img 类模型或联系管理员配置",
+                )
+        size = params.get("image_size") or "1024*1024"
+        body = {
+            "model": model.model_code,
+            "input": {"prompt": prompt, "base_image_url": image_url},
+            "parameters": {"size": size},
+        }
+
+        def validate(resp: httpx.Response) -> None:
+            if resp.status_code >= 400:
+                raise self._map_http_error(resp.status_code, resp.text)
+
+        resp = await self._post_with_retry(
+            IMAGE2IMAGE_SUBMIT_URL,
+            headers=self._headers(extra={"X-DashScope-Async": "enable"}),
+            json_body=body,
+            model_type="image",
+            validate=validate,
+        )
+        data = resp.json()
+        task_id = (data.get("output") or {}).get("task_id")
+        if not task_id:
+            raise ProviderError("provider_bad_response", "图生图服务未返回任务句柄", resp.text[:500])
+
+        result = await self._poll_image_task(task_id)
+        urls: list[str] = []
+        for src in result.get("results", []):
+            url = src.get("url")
+            if not url:
+                continue
+            # 下载 OSS 结果图落盘,避免签名 URL 过期
+            local = await self._download_image(url)
+            if local:
+                urls.append(local)
+        if not urls:
+            raise ProviderError("provider_bad_response", "图生图服务未返回图像", json.dumps(data)[:500])
+        return {"image_urls": urls, "raw": data}
+
     async def _poll_image_task(self, task_id: str, interval: float = 2.0, max_sec: float = 110.0) -> dict:
         """轮询 wanx 任务结果,SUCCEEDED 返回 {"results": [...]},否则超时抛错。"""
         deadline = time.monotonic() + max_sec
@@ -265,8 +326,14 @@ class DashScopeProvider(BaseProvider):
         """声音合成:POST multimodal-generation(generation),返回音频 URL 落盘为 /static/<名>。
 
         params.text 为合成文本;返回值 {"audio_url": "/static/...", "raw": ...}。
+        params 含 sample_audio_url(参考音频)时为声音克隆需求,百炼本期未接入,
+        明确提示换用硅基流动模型或 Mock(任务失败不扣费)。
         """
         params = params or {}
+        if str(params.get("sample_audio_url") or "").strip():
+            raise ProviderError(
+                "provider_not_ready", "百炼声音克隆本期未接入，请使用硅基流动模型或 Mock 演示"
+            )
         text = (params.get("text") or "").strip()
         if not text:
             raise ProviderError("invalid_params", "声音合成缺少文本内容")

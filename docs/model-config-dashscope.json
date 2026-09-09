@@ -13,7 +13,14 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "阿里云百炼 Qwen-Plus 对话模型,免费额度,文本对话主链路",
-      "capability_tags": ["对话", "推理", "百炼"]
+      "capability_tags": [
+        "对话",
+        "推理",
+        "百炼"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 8,
+      "token_output_price": 20
     },
     {
       "name": "Qwen-Turbo 对话(百炼)",
@@ -27,7 +34,14 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "阿里云百炼 Qwen-Turbo 快速低成本对话模型",
-      "capability_tags": ["对话", "百炼", "快速"]
+      "capability_tags": [
+        "对话",
+        "百炼",
+        "快速"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 3,
+      "token_output_price": 6
     },
     {
       "name": "通义万相文生图(百炼)",
@@ -41,7 +55,10 @@
       "status": "enabled",
       "config_json": "{\"image_size\": \"1024*1024\", \"num\": 1}",
       "description": "阿里云百炼通义万相文生图模型,异步提交轮询出图",
-      "capability_tags": ["图像生成", "百炼"]
+      "capability_tags": [
+        "图像生成",
+        "百炼"
+      ]
     },
     {
       "name": "Qwen-TTS 声音合成(百炼)",
@@ -55,7 +72,10 @@
       "status": "enabled",
       "config_json": "{}",
       "description": "阿里云百炼语音合成模型,文本转语音",
-      "capability_tags": ["语音合成", "百炼"]
+      "capability_tags": [
+        "语音合成",
+        "百炼"
+      ]
     },
     {
       "name": "Fun-ASR 语音识别(百炼)",
@@ -69,7 +89,10 @@
       "status": "enabled",
       "config_json": "{}",
       "description": "阿里云百炼语音识别模型,音频转文本(需公网音频地址)",
-      "capability_tags": ["语音识别", "百炼"]
+      "capability_tags": [
+        "语音识别",
+        "百炼"
+      ]
     }
   ]
 }

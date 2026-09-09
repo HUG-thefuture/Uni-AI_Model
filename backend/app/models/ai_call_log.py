@@ -27,6 +27,15 @@ class AiCallLog(Base):
     latency_ms: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0", comment="耗时(毫秒)")
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0", comment="是否成功")
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="错误码(成功为空)")
+    prompt_tokens: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="输入 token 数(上游 usage 缺失时为估算值,失败为空)"
+    )
+    completion_tokens: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="输出 token 数(上游 usage 缺失时为估算值,失败为空)"
+    )
+    total_tokens: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="总 token 数(prompt+completion)"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), comment="创建时间"
     )

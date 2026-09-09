@@ -30,7 +30,6 @@ from .routers import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 
-
 def create_app() -> FastAPI:
     settings = get_settings()  # 必填环境变量缺失时在此抛出,启动即失败
     logging.basicConfig(
@@ -39,10 +38,17 @@ def create_app() -> FastAPI:
         stream=sys.stdout,
     )
 
+    # CORS:默认仅 localhost/127.0.0.1;生产通过 CORS_ORIGINS 配置逗号分隔的白名单
+    cors_pattern = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    extra_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if extra_origins:
+        escaped = "|".join(o.replace(".", r"\.").replace("://", "://") for o in extra_origins)
+        cors_pattern = rf"({cors_pattern}|^({escaped})$)"
+
     app = FastAPI(title="AI 大模型门户", version="0.2.0", docs_url=f"{settings.api_prefix}/docs")
     app.add_middleware(
         CORSMiddleware,
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_origin_regex=cors_pattern,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -74,8 +80,12 @@ def create_app() -> FastAPI:
     # open_api 自带 /v1/chat/completions 别名，只挂一次可避免 /api/v1 路径重复。
     app.include_router(open_api.router, prefix=settings.api_prefix)
     from .routers import wallet
-    app.include_router(wallet.router)
-    app.include_router(api_key.router)
+    from .routers import api_key
+    from .routers import auth_sms
+    # 钱包/开放平台 Key/短信认证 路由同样统一走 settings.api_prefix,保持外部 URL 不变
+    app.include_router(wallet.router, prefix=settings.api_prefix)
+    app.include_router(api_key.router, prefix=settings.api_prefix)
+    app.include_router(auth_sms.router, prefix=settings.api_prefix)
     return app
 
 
@@ -83,4 +93,4 @@ app = create_app()
 
 # 测试
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8004)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000)

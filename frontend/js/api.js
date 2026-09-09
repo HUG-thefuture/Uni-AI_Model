@@ -44,6 +44,9 @@
 
   function notifyUnauthorized(detail) {
     window.dispatchEvent(new CustomEvent('portal:unauthorized', { detail: detail || {} }));
+    // 已在登录页时不做跳转(短信登录验证码错误等 401 会刷新页面打断交互)
+    const loginPage = (config.loginUrl || '').split('?')[0];
+    if (loginPage && location.pathname.endsWith(loginPage)) return;
     if (!config.demoMode && config.loginUrl) {
       const returnTo = `${location.pathname}${location.hash}`;
       const separator = config.loginUrl.includes('?') ? '&' : '?';
@@ -150,6 +153,26 @@
     recharge(payload) {
       return request({ url: '/api/wallet/recharge', method: 'POST', data: payload });
     },
+    orderDetail(orderNo) {
+      return request({ url: `/api/wallet/orders/${encodeURIComponent(orderNo)}` });
+    },
+    orderMockPay(orderNo) {
+      return request({ url: `/api/wallet/orders/${encodeURIComponent(orderNo)}/mock-pay`, method: 'POST' });
+    },
+    orderSync(orderNo) {
+      return request({ url: `/api/wallet/orders/${encodeURIComponent(orderNo)}/sync`, method: 'POST' });
+    },
+    walletRecordsExport() {
+      // 账单 CSV 导出:带 token 拉取文本,交给浏览器下载
+      const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+      const currentToken = token();
+      if (currentToken) headers.Authorization = `Bearer ${currentToken}`;
+      return fetch(`${config.apiBase}/api/wallet/records/export`, { headers })
+        .then(response => {
+          if (!response.ok) throw { message: '账单导出失败,请稍后重试。' };
+          return response.text();
+        });
+    },
     invoices(params) {
       return request({ url: `/api/wallet/invoices${params ? `?${$.param(params)}` : ''}` });
     },
@@ -251,8 +274,22 @@
     },
 
     // ===== 个人中心 · 用量统计 =====
-    usageStats() {
-      return request({ url: '/api/stats/usage' });
+    usageStats(params) {
+      const query = params ? new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v !== '' && v != null)
+      ).toString() : '';
+      return request({ url: `/api/stats/usage${query ? `?${query}` : ''}` });
+    },
+
+    // ===== 短信验证码 =====
+    smsSend(payload) {
+      return request({ url: '/api/auth/sms/send', method: 'POST', data: payload, auth: false });
+    },
+    smsLogin(payload) {
+      return request({ url: '/api/auth/sms/login', method: 'POST', data: payload, auth: false });
+    },
+    smsBind(payload) {
+      return request({ url: '/api/auth/sms/bind', method: 'POST', data: payload });
     },
 
     // ===== 个人中心 · API Key 管理 =====
@@ -264,6 +301,9 @@
     },
     updateApiKeyStatus(id, status) {
       return request({ url: `/api/api_keys/${encodeURIComponent(id)}/status`, method: 'PUT', data: { status } });
+    },
+    deleteApiKey(id) {
+      return request({ url: `/api/api_keys/${encodeURIComponent(id)}`, method: 'DELETE' });
     },
 
     // ===== 管理后台 · 用户管理 =====

@@ -23,7 +23,7 @@ from ..schemas.task import (
     TextTaskCreate,
     VideoTaskCreate,
 )
-from ..services import av_service, billing, chat_service, task_service
+from ..services import av_service, billing, chat_service, pricing, task_service
 
 router = APIRouter(tags=["tasks"])
 
@@ -32,23 +32,28 @@ router = APIRouter(tags=["tasks"])
 
 def _create_text_task(db: Session, body: TextTaskCreate, user: User):
     """建流前完成全部校验(失败直接 raise,不进入流):
-    模型存在且 enabled → 余额冻结 → 会话归属 → 创建 ai_tasks(processing/frozen)、
-    写 user 消息;成功收尾/失败释放由 chat_service.stream_text_reply 负责。"""
+    模型存在且 enabled → 按计费方式冻结(按token:输入估算+输出封顶;按次:price_per_call)
+    → 会话归属 → 创建 ai_tasks(processing/frozen)、写 user 消息;
+    成功收尾/失败释放由 chat_service.stream_text_reply 负责。"""
     model = chat_service.get_enabled_model(db, body.model_id)
     if model.model_type != "text":
         raise APIError(409, "该模型不支持文本对话")
     session = chat_service.get_owned_session(db, user.id, body.session_id)
-    billing.freeze(db, user.id, model.price_per_call)  # 余额不足 409「积分不足,请先充值」
+    # 预扣冻结:prompt 字符须含历史上下文,避免长会话低估冻结额
+    history = chat_service.recent_messages(db, session.id)
+    prompt_chars = len(body.message or "") + sum(len(m.get("content") or "") for m in history)
+    frozen = pricing.freeze_amount(model, prompt_chars)
+    billing.freeze(db, user.id, frozen)  # 余额不足 409「余额不足,请先充值」
     task = AiTask(
         request_id=current_request_id(), user_id=user.id, model_id=model.id,
         task_type="text", prompt=body.message,
-        status="processing", cost_status="frozen", cost=model.price_per_call,
+        status="processing", cost_status="frozen", cost=frozen, frozen_cost=frozen,
     )
     db.add(task)
     chat_service.add_user_message(db, session, body.message, model.id)
     db.commit()
     db.refresh(task)
-    return model, session, task
+    return model, session, task, frozen
 
 
 def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask:
@@ -68,11 +73,15 @@ def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask
     if dup is not None:
         raise APIError(409, "请勿重复提交")
     params = body.params.model_dump(exclude_none=True) if body.params else {}
-    billing.freeze(db, user.id, model.price_per_call)
+    # 预估张数:未指定按 2 张保守冻结(供应商默认 1-2 张),结算按实际产出多退少不补
+    est_qty = min(max(int(params.get("num") or 2), 1), 4)
+    frozen = pricing.per_call_sell_micro(model, est_qty)
+    billing.freeze(db, user.id, frozen)
     task = AiTask(
         request_id=current_request_id(), user_id=user.id, model_id=model.id,
         task_type="image", prompt=body.prompt, params_json=json.dumps(params, ensure_ascii=False),
-        status="pending", cost_status="frozen", cost=model.price_per_call,
+        status="pending", cost_status="frozen", cost=frozen,
+        frozen_cost=frozen,
     )
     db.add(task)
     db.commit()
@@ -94,12 +103,21 @@ def _retry_task(db: Session, task_id: int, user: User) -> AiTask:
     model = db.get(Model, task.model_id)
     if model is None or model.status != "enabled":
         raise APIError(409, "模型维护中,暂不可调用")
-    billing.freeze(db, user.id, model.price_per_call)  # 重新冻结
+    # 重新冻结:按任务参数里的预估张数(缺省按 2 张保守估算)
+    est_qty = 2
+    if task.params_json:
+        try:
+            est_qty = min(max(int(json.loads(task.params_json).get("num") or 2), 1), 4)
+        except ValueError:
+            pass
+    frozen = pricing.per_call_sell_micro(model, est_qty)
+    billing.freeze(db, user.id, frozen)  # 重新冻结
     task.status = "pending"
     task.error_message = None
     task.result_text = None
     task.result_url = None
-    task.cost = model.price_per_call
+    task.cost = frozen
+    task.frozen_cost = frozen
     task.cost_status = "frozen"
     task.latency_ms = None
     db.commit()
@@ -114,11 +132,11 @@ async def create_text_task(body: TextTaskCreate,
                            user: User = Depends(get_current_user),
                            db: Session = Depends(get_db)):
     """建流前校验/冻结/建任务在线程池完成,随后进入流式透传。"""
-    model, session, task = await run_db(_create_text_task, db, body, user)
+    model, session, task, frozen = await run_db(_create_text_task, db, body, user)
     return StreamingResponse(
         chat_service.stream_text_reply(
             user_id=user.id, model=model, session_id=session.id, task_id=task.id,
-            cost=model.price_per_call, request_id=task.request_id, prompt=body.message,
+            frozen=frozen, request_id=task.request_id, prompt=body.message,
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

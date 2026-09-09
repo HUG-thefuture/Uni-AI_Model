@@ -46,12 +46,12 @@ class ModelSeedTest(unittest.TestCase):
             _DB_FILE.unlink()
 
     def test_01_load_templates_merges_all(self) -> None:
-        """三个模板(通用/阿里百炼/终版导出)合并去重后应为 9 个模型。"""
+        """三个模板(通用/阿里百炼/终版导出)合并去重后应为 15 个模型。"""
         items, files = load_templates()
         self.assertEqual(len(files), 3, f"应加载 3 个模板文件,实际: {files}")
         keys = [(i["model_code"], i["provider_type"]) for i in items]
         self.assertEqual(len(keys), len(set(keys)), "合并后不允许出现重复 (model_code, provider_type)")
-        self.assertEqual(len(items), 9, f"合并去重后应为 9 个模型,实际 {len(items)}: {sorted(keys)}")
+        self.assertEqual(len(items), 15, f"合并去重后应为 15 个模型,实际 {len(items)}: {sorted(keys)}")
         dashscope_codes = {i["model_code"] for i in items if i["vendor"] == "dashscope"}
         self.assertLessEqual(
             {"qwen-plus", "qwen-turbo", "wanx2.1-t2i-turbo", "qwen-tts", "fun-asr"},
@@ -60,19 +60,19 @@ class ModelSeedTest(unittest.TestCase):
         )
 
     def test_02_seed_all_models_one_step(self) -> None:
-        """一步初始化:建表 + 9 个模型全部入库。"""
+        """一步初始化:建表 + 15 个模型全部入库。"""
         result = seed_all_models(verbose=False)
-        self.assertEqual(result["total"], 9)
-        self.assertEqual(result["created"], 9)
+        self.assertEqual(result["total"], 15)
+        self.assertEqual(result["created"], 15)
         self.assertEqual(result["updated"], 0)
-        self.assertEqual(_model_count(), 9)
+        self.assertEqual(_model_count(), 15)
 
     def test_03_seed_all_models_idempotent(self) -> None:
         """重复执行一步初始化:全部走更新分支,不产生重复行。"""
         result = seed_all_models(verbose=False)
-        self.assertEqual((result["created"], result["updated"]), (0, 9))
-        self.assertEqual(_model_count(), 9)
-        self.assertEqual(len(_codes()), 9)
+        self.assertEqual((result["created"], result["updated"]), (0, 15))
+        self.assertEqual(_model_count(), 15)
+        self.assertEqual(len(_codes()), 15)
 
     def test_04_upsert_reflects_template_changes(self) -> None:
         """模板字段变更后重跑 upsert,DB 同步更新(其他人拉最新数据的核心语义)。"""
@@ -93,7 +93,7 @@ class ModelSeedTest(unittest.TestCase):
         """单模板补种 + seed_models.load_template() 缺省口径仍指向 template 模板。"""
         result = seed_one(DEFAULT_TEMPLATE_PATH, verbose=False)
         self.assertEqual(result["total"], 4)
-        self.assertEqual(_model_count(), 9)
+        self.assertEqual(_model_count(), 15)
         from scripts.seed_models import load_template as compat_load_template
 
         legacy_items = compat_load_template()

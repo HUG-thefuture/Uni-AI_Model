@@ -2,6 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="四川高校大模型门户登录与注册" />
   <title>登录 - 四川高校大模型门户</title>
@@ -20,7 +22,7 @@
         <li><i class="layui-icon layui-icon-picture"></i><span><strong>视觉生成</strong><small>图像与视频创作任务</small></span></li>
         <li><i class="layui-icon layui-icon-voice"></i><span><strong>声音创作</strong><small>语音合成和风格探索</small></span></li>
       </ul>
-      <p class="auth-intro-foot">课程项目演示版 · 请使用本人账号</p>
+      <p class="auth-intro-foot">四川高校 AI 大模型门户 · 请使用本人账号</p>
     </section>
     <section class="auth-panel-wrap"><div class="auth-panel">
       <a class="auth-back" href="index.html"><i class="layui-icon layui-icon-left"></i>返回门户首页</a>
@@ -38,10 +40,14 @@
         <label class="auth-remember"><input type="checkbox" id="auth-remember" checked /><span>在此设备上保持登录</span></label>
         <p class="auth-error" id="auth-error" role="alert" hidden></p><button class="btn-primary auth-submit" id="auth-submit" type="submit">登录并进入门户</button>
       </form><p class="auth-switch"><span id="auth-switch-label">还没有账号？</span><button type="button" id="auth-switch">创建账号</button></p></section>
-      <section id="sms-pane" role="tabpanel" aria-labelledby="sms-tab" hidden><div class="auth-pending" role="status"><span class="auth-pending-icon"><i class="layui-icon layui-icon-cellphone"></i></span><h3>短信验证码正在对接</h3><p>当前后端尚未提供短信发送和校验接口。为避免展示无法验证的伪功能，此通道将在接口确认后开放。</p><button class="btn-secondary" type="button" data-return-password>使用账号密码登录</button></div></section>
-      <p class="auth-notice"><i class="layui-icon layui-icon-tips"></i><span>请勿在公共设备上勾选“保持登录”。演示模式不建立真实登录状态。</span></p>
+      <section id="sms-pane" role="tabpanel" aria-labelledby="sms-tab" hidden><form id="sms-form" novalidate>
+        <div class="form-block"><label class="field-label" for="sms-phone">手机号</label><input class="field" id="sms-phone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="11" placeholder="请输入11位手机号" /></div>
+        <div class="form-block"><label class="field-label" for="sms-code">短信验证码</label><div style="display:flex; gap:8px; align-items:center"><input class="field" id="sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6位数字验证码" style="flex:1; min-width:0" /><button class="btn-secondary" type="button" id="sms-send-btn" style="white-space:nowrap">获取验证码</button></div><p class="field-hint" id="sms-debug-hint" hidden></p></div>
+        <p class="auth-error" id="sms-error" role="alert" hidden></p><button class="btn-primary auth-submit" id="sms-submit" type="submit">登录并进入门户</button>
+      </form></section>
+      <p class="auth-notice"><i class="layui-icon layui-icon-tips"></i><span>支持「账号密码」与「手机号 + 短信验证码」两种登录方式。请勿在公共设备上勾选“保持登录”。</span></p>
     </div></section>
   </main>
-  <script src="vendor/jquery/jquery-3.7.1.min.js"></script><script src="js/config.js?v=20260902-1"></script><script src="js/api.js?v=20260904-1"></script><script src="js/auth.js?v=20260902-2"></script>
+  <script src="vendor/jquery/jquery-3.7.1.min.js"></script><script src="js/config.js?v=20260907-7"></script><script src="js/api.js?v=20260907-7"></script><script src="js/auth.js?v=20260907-7"></script>
 </body>
 </html>

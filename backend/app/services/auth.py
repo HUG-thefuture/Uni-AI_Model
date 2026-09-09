@@ -2,7 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..schemas.auth import Register_req, Login_req
 from ..models.user import User, UserProfile, Wallet
+from ..core.config import get_settings
 from ..core.response import APIError
+from ..services.pricing import to_micro
 from ..core.security import hash_password, verify_password, create_access_token
 
 
@@ -24,7 +26,9 @@ async def register(db: AsyncSession, payload: Register_req) -> User:
     await db.flush()  # 拿到 user.id
 
     profile = UserProfile(user_id=user.id, nickname=payload.nickname or payload.username)
-    wallet = Wallet(user_id=user.id, balance=0, total_recharged=0, total_consumed=0)
+    # 注册赠金额(元,商业化运营口径,默认 10,可用 DEFAULT_REGISTER_POINTS 配置);账本存微元
+    gift = to_micro(max(0, get_settings().default_register_points))
+    wallet = Wallet(user_id=user.id, balance=gift, total_recharged=0, total_consumed=0)
     db.add_all([profile, wallet])
     try:
         await db.commit()

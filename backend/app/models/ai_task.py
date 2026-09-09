@@ -1,7 +1,7 @@
 """ai_tasks 表:四类 AI 任务统一(文本/图像/声音克隆/语音识别/视频),成员2负责。
 
 - user_id 逻辑外键 users.id(见 docs/数据字典.md),应用层校验归属;
-- cost 为整数积分点,失败一律为 0(红线:调用失败不得扣费);
+- cost 为整数微元(1 元 = 10_000 微元),失败一律为 0(红线:调用失败不得扣费);
 - status 四态:pending → processing → succeeded / failed(前端轮询依赖此口径)。
 """
 from sqlalchemy import BigInteger, Index, String, Text
@@ -40,10 +40,20 @@ class AiTask(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="失败原因(中文)")
     cost: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0",
-        comment="消耗积分点(整数,失败为 0)",
+        comment="最终消耗金额(微元,1元=1000000;失败为 0;按token计费=实际结算值)",
     )
     cost_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="frozen", server_default="frozen",
         comment="frozen(预冻结) / settled(结算) / refunded(退回)",
+    )
+    frozen_cost: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0",
+        comment="预冻结金额(微元;按token计费时为预扣估算值,结算后多退少不补)",
+    )
+    prompt_tokens: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="输入 token 数(来自上游 usage,成功后回填)"
+    )
+    completion_tokens: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="输出 token 数(来自上游 usage,成功后回填)"
     )
     latency_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="总耗时(毫秒)")

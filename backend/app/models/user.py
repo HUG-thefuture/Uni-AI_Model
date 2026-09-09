@@ -18,6 +18,9 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(
         String(50), nullable=False, unique=True, comment="用户名(唯一)"
     )
+    phone: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, unique=True, comment="手机号(唯一,短信登录身份;未绑定为 NULL)"
+    )
     password_hash: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="密码哈希,禁止明文"
     )
@@ -66,15 +69,20 @@ class Wallet(TimestampMixin,Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, autoincrement=False, comment="逻辑外键 users.id"
     )
-    # 金额单位为“分”，所以用 Integer 或 BigInteger
+    # 金额口径(全平台统一,2026-09-07 起按元记账):账本单位微元,1 元 = 1_000_000 微元(0.000001 元)
     balance: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(分)"
+        BigInteger, nullable=False, default=0, server_default="0", comment="可用余额(微元,1元=1000000)"
     )
     total_recharged: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="累计充值金额(分)"
+        BigInteger, nullable=False, default=0, server_default="0", comment="累计充值(微元,1元=1000000)"
     )
     total_consumed: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=0, server_default="0", comment="累计消费金额(分)"
+        BigInteger, nullable=False, default=0, server_default="0", comment="累计消费(微元,1元=1000000)"
+    )
+    # 已废弃:微元精度下 token 费用可精确扣减,不再需要小额累积器(2026-09-07 迁移时已并入余额)
+    credit_remainder: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0",
+        comment="已废弃(历史尾差累积器,迁移时并入余额)",
     )
     # 乐观锁版本号，防并发扣减
     version: Mapped[int] = mapped_column(

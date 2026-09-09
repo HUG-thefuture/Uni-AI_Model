@@ -21,9 +21,10 @@ class RechargeResponse(BaseModel):
     )
 
 class WalletResponse(BaseModel):
-    balance: int
-    total_recharged: int
-    total_consumed: int
+    """钱包(元口径;账本为微元,序列化前由服务层换算)。"""
+    balance: float
+    total_recharged: float
+    total_consumed: float
 
     model_config = ConfigDict(
         from_attributes=True

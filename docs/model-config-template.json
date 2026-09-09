@@ -13,7 +13,13 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"max_tokens\": 1024}",
       "description": "硅基流动托管的中英文对话模型,用于文本对话主链路",
-      "capability_tags": ["对话", "推理"]
+      "capability_tags": [
+        "对话",
+        "推理"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 4,
+      "token_output_price": 4
     },
     {
       "name": "Stable Diffusion 文生图(线上)",
@@ -27,7 +33,9 @@
       "status": "enabled",
       "config_json": "{\"image_size\": \"1024x1024\", \"num_inference_steps\": 28}",
       "description": "硅基流动文生图模型,用于图像生成任务",
-      "capability_tags": ["图像生成"]
+      "capability_tags": [
+        "图像生成"
+      ]
     },
     {
       "name": "Qwen2.5 3B(本地 Ollama)",
@@ -41,7 +49,13 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7, \"num_ctx\": 4096}",
       "description": "Ollama 本地部署的小参数对话模型,免费演示与断网兜底",
-      "capability_tags": ["对话", "本地"]
+      "capability_tags": [
+        "对话",
+        "本地"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 2,
+      "token_output_price": 2
     },
     {
       "name": "Qwen2.5 1.5B(本地 Ollama)",
@@ -55,7 +69,13 @@
       "status": "enabled",
       "config_json": "{\"temperature\": 0.7}",
       "description": "Ollama 本地小参数模型,免费演示与断网兜底",
-      "capability_tags": ["对话", "本地"]
+      "capability_tags": [
+        "对话",
+        "本地"
+      ],
+      "billing_mode": "per_token",
+      "token_input_price": 2,
+      "token_output_price": 2
     }
   ]
 }
