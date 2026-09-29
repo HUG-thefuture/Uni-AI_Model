@@ -1,7 +1,7 @@
 """ai_tasks 表:四类 AI 任务统一(文本/图像/声音克隆/语音识别/视频),成员2负责。
 
 - user_id 逻辑外键 users.id(见 docs/数据字典.md),应用层校验归属;
-- cost 为整数微元(1 元 = 10_000 微元),失败一律为 0(红线:调用失败不得扣费);
+- cost 为整数微元(1 元 = 1_000_000 微元,精度 0.000001 元),失败一律为 0(红线:调用失败不得扣费);
 - status 四态:pending → processing → succeeded / failed(前端轮询依赖此口径)。
 """
 from sqlalchemy import BigInteger, Index, String, Text
@@ -17,6 +17,8 @@ class AiTask(TimestampMixin, Base):
         Index("idx_user_created", "user_id", "created_at"),
         Index("idx_status_created", "status", "created_at"),
         Index("idx_task_type", "task_type"),
+        # 幂等去重的数据库兜底:同一用户同一 request_id 只允许一个任务(并发窗口下防双冻结)
+        Index("uk_task_user_request", "user_id", "request_id", unique=True),
         {"comment": "AI 任务表(文本/图像/声音/视频统一)"},
     )
 

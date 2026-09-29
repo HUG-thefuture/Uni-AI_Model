@@ -121,17 +121,21 @@ def _timeout_exc(exc: Exception) -> bool:
 
 
 def _mark_text_failed(db: Session, task_id: int, user_id: int, exc: Exception, start: float) -> None:
-    """流式失败:释放冻结、任务标 failed(费用归 0、cost_status=refunded)。"""
+    """流式失败:释放冻结、任务标 failed(费用归 0、cost_status=refunded)。
+
+    已结算(settled)的任务不翻状态:回复已落库、资金已扣,断连只影响投递不影响账务。
+    """
     task = db.get(AiTask, task_id)
     if task is None:
         return
-    if task.cost_status == "frozen":
-        frozen = task.frozen_cost or task.cost or 0
-        if frozen:
-            billing.refund(db, user_id, frozen, task_id=task_id, model_id=task.model_id)
-        task.frozen_cost = 0
-        task.cost = 0
-        task.cost_status = "refunded"
+    if task.cost_status != "frozen":
+        return
+    frozen = task.frozen_cost or task.cost or 0
+    if frozen:
+        billing.refund(db, user_id, frozen, task_id=task_id, model_id=task.model_id)
+    task.frozen_cost = 0
+    task.cost = 0
+    task.cost_status = "refunded"
     task.status = "failed"
     if _timeout_exc(exc):
         task.error_message = "生成超时,本次不扣费"
@@ -217,9 +221,11 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
     error_code: str | None = None
     settled_cost: int | None = None
     prompt_tokens = completion_tokens = None
-    history = await run_db(recent_messages, db, session_id)
-    stream = provider.generate_text(model, history).__aiter__()
+    stream = None
     try:
+        # 建流前的取历史/生成器构建也可能抛错(DB 异常/未知供应商),纳入 try 保证冻结可退
+        history = await run_db(recent_messages, db, session_id)
+        stream = provider.generate_text(model, history).__aiter__()
         chunk = None
         got_first = False
         while True:
@@ -274,8 +280,9 @@ async def stream_text_reply(*, user_id: int, model, session_id: int, task_id: in
         _write_call_log(db, request_id=request_id, user_id=user_id, model=model,
                         provider=provider, start=start, success=success, error_code=error_code,
                         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
-        try:
-            await stream.aclose()
-        except Exception:  # noqa: BLE001
-            pass
+        if stream is not None:
+            try:
+                await stream.aclose()
+            except Exception:  # noqa: BLE001
+                pass
         db.close()

@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import UploadFile
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..core.config import get_settings
@@ -130,6 +131,10 @@ def submit_av_task(db: Session, user: User, model: Model, task_type: str,
         frozen_cost=frozen,
     )
     db.add(task)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise APIError(409, "请勿重复提交")
     db.refresh(task)
     return task

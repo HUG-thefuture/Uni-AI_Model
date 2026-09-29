@@ -6,6 +6,8 @@
 - /notify/alipay 是支付宝异步通知(公开路由,明文 success/fail 响应,不走统一响应壳);
 - /orders/{no}/sync 供本地开发(无公网 notify)在浏览器回跳后同步查单闭环。
 """
+import logging
+
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import PlainTextResponse
@@ -20,6 +22,8 @@ from ..schemas.wallet import RechargeResponse
 from ..services import admin_wallet, payment, wallet
 from ..services.pricing import to_micro, to_yuan
 from ..core.db import get_async_db
+
+logger = logging.getLogger("app.wallet")
 
 router = APIRouter(
     prefix="/wallet",
@@ -118,6 +122,21 @@ async def alipay_notify(request: Request, db: AsyncSession = Depends(get_async_d
     order_no = str(params.get("out_trade_no") or "")
     trade_no = str(params.get("trade_no") or "")
     if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED") and order_no:
+        # 回执加固:核对 app_id 与订单金额一致后才入账,防止网关配置错乱/串单
+        from ..core.config import get_settings
+        if str(params.get("app_id") or "") != get_settings().alipay_app_id:
+            return PlainTextResponse("fail")
+        try:
+            notified_amount = float(params.get("total_amount") or -1)
+        except (TypeError, ValueError):
+            return PlainTextResponse("fail")
+        order = await wallet.find_order(db, order_no)
+        if order is None:
+            return PlainTextResponse("fail")
+        if f"{notified_amount:.2f}" != f"{float(order.amount):.2f}":
+            logger.warning("支付宝回执金额与订单不一致 order_no=%s notify=%s order=%s",
+                           order_no, notified_amount, order.amount)
+            return PlainTextResponse("fail")
         try:
             # 通知可能先于本地订单可见(主从延迟),异常时回 fail 让支付宝重试
             await wallet.settle_order_payment(db, order_no, external_trade_no=trade_no or f"ALIPAY-{order_no}",

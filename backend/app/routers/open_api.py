@@ -109,8 +109,14 @@ def _write_usage_log(db: Session, *, key_id: int | None, user_id: int | None, pa
 
 def _mark_task_failed(db: Session, task: AiTask | None, user_id: int, cost: int,
                       error_message: str) -> None:
-    """失败释放:冻结退回、任务 failed(cost=0、cost_status=refunded)。"""
+    """失败释放:冻结退回、任务 failed(cost=0、cost_status=refunded)。
+
+    已结算(settled)的任务不翻状态:结算后断连时资金已闭环,任务保持 succeeded。
+    """
     if task is not None:
+        if task.cost_status == "settled":
+            db.commit()
+            return
         if task.cost_status == "frozen":
             frozen = task.frozen_cost or cost or 0
             if frozen:
@@ -232,7 +238,7 @@ async def chat_completions(
     params = _build_params(body)
     # 预扣冻结:按 token 计费按输入估算+输出封顶,按次取 price_per_call
     prompt_chars = sum(len(m["content"] or "") for m in messages)
-    frozen = pricing.freeze_amount(model, prompt_chars)
+    frozen = pricing.freeze_amount(model, prompt_chars, out_tokens_override=getattr(body, "max_tokens", None))
     request_id = current_request_id()
     chatcmpl_id = f"chatcmpl-{request_id}"
     start = time.monotonic()
@@ -248,6 +254,15 @@ async def chat_completions(
         try:
             async with asyncio.timeout(get_settings().sse_total_timeout):
                 result = await _generate_once(provider, model, messages, params)
+        except asyncio.CancelledError:
+            # 服务关停/上游取消:与流式路径同口径,释放冻结后原样抛出
+            # 取消路径内不再 await(二次取消会丢失收尾),同步直调
+            _finish_failure(db, task_id=task.id, key_id=key.id,
+                            api_key_id=request.state.api_key_id, path=request.url.path,
+                            model_id=model.id, vendor=getattr(provider, "vendor", "unknown"),
+                            request_id=request_id, start=start, cost=frozen,
+                            message="生成中断,本次不扣费", error_code="cancelled")
+            raise
         except Exception as exc:  # noqa: BLE001 含 ProviderError / 超时
             is_timeout = isinstance(exc, TimeoutError)
             error_code = getattr(exc, "code", None) or (

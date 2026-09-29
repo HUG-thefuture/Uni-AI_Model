@@ -30,6 +30,52 @@ from .routers import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 
+def _recover_interrupted_tasks() -> None:
+    """启动补偿:进程重启会丢失内存中后台任务的收尾,滞留的冻结资金统一退回。
+
+    仅处理 pending/processing 且 cost_status=frozen 的任务(正常收尾后为 settled/refunded,
+    不会命中);退回冻结额并标记失败,保证「失败绝不扣费」在重启场景下同样成立。
+    """
+    import logging
+    from sqlalchemy import select
+
+    from .models.ai_task import AiTask
+    from .core.db import SessionLocal
+    from .services import billing
+
+    logger = logging.getLogger("app.recovery")
+    with SessionLocal() as db:
+        tasks = db.execute(
+            select(AiTask).where(
+                AiTask.status.in_(("pending", "processing")),
+                AiTask.cost_status == "frozen",
+            )
+        ).scalars().all()
+        if not tasks:
+            return
+        for task in tasks:
+            frozen = task.frozen_cost or task.cost or 0
+            if frozen:
+                billing.refund(db, task.user_id, frozen, task_id=task.id, model_id=task.model_id)
+            task.frozen_cost = 0
+            task.cost = 0
+            task.cost_status = "refunded"
+            task.status = "failed"
+            task.error_message = "服务重启导致任务中断,冻结金额已全额退回,请重新提交"
+        db.commit()
+        logger.warning("启动恢复:%s 个中断任务已退款并标记失败", len(tasks))
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """应用生命周期:启动时执行中断任务恢复,避免重启后冻结资金滞留。"""
+    _recover_interrupted_tasks()
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()  # 必填环境变量缺失时在此抛出,启动即失败
     logging.basicConfig(
@@ -45,7 +91,8 @@ def create_app() -> FastAPI:
         escaped = "|".join(o.replace(".", r"\.").replace("://", "://") for o in extra_origins)
         cors_pattern = rf"({cors_pattern}|^({escaped})$)"
 
-    app = FastAPI(title="AI 大模型门户", version="0.2.0", docs_url=f"{settings.api_prefix}/docs")
+    app = FastAPI(title="AI 大模型门户", version="0.2.0", docs_url=f"{settings.api_prefix}/docs",
+                  lifespan=_lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=cors_pattern,

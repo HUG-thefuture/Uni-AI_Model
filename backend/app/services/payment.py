@@ -133,7 +133,7 @@ def build_pay_url(order) -> str | None:
             "out_trade_no": order.order_no,
             "product_code": "FAST_INSTANT_TRADE_PAY",
             "total_amount": f"{order.amount:.2f}",
-            "subject": f"积分充值-{order.points}积分",
+            "subject": f"余额充值-{order.amount}元",
         }, ensure_ascii=False),
     }
     if s.alipay_notify_url:

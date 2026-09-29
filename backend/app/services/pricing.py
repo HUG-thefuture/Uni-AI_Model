@@ -116,16 +116,20 @@ def per_call_sell_micro(model: Model, quantity: int = 1) -> int:
     return max(0, unit) * max(1, int(quantity))
 
 
-def freeze_amount(model: Model, prompt_chars: int) -> int:
+def freeze_amount(model: Model, prompt_chars: int, out_tokens_override: int | None = None) -> int:
     """预扣冻结额(微元):per_call 取单价;per_token 按「输入估算 + 输出封顶」估算。
 
     prompt_chars 须含历史上下文字符(调用方拼接),输出按 config_json.max_tokens
-    (缺省 2048)封顶;估算按售价,保守偏大,实际结算后差额退回。
+    (缺省 2048)封顶;请求方显式要求更大输出(out_tokens_override,如 OpenAI 兼容
+    接口的 max_tokens)时取两者较大值,避免冻结低估导致实际补扣受余额封顶而少收。
+    估算按售价,保守偏大,实际结算后差额退回。
     """
     if not is_per_token(model):
         return per_call_sell_micro(model)
     sell_in, sell_out = sell_prices(model)
     in_tokens = max(1, (prompt_chars or 0) // CHARS_PER_TOKEN)
     out_tokens = _model_int_param(model, "max_tokens", DEFAULT_MAX_TOKENS_CAP)
+    if out_tokens_override is not None and int(out_tokens_override) > 0:
+        out_tokens = max(out_tokens, int(out_tokens_override))
     micro = (in_tokens * sell_in + out_tokens * sell_out) // 10
     return max(0, micro)

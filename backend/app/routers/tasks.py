@@ -6,6 +6,7 @@ SSE 响应头:Cache-Control: no-cache、X-Accel-Buffering: no(禁 Nginx 缓冲)�
 import json
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.exc import IntegrityError
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -51,7 +52,12 @@ def _create_text_task(db: Session, body: TextTaskCreate, user: User):
     )
     db.add(task)
     chat_service.add_user_message(db, session, body.message, model.id)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 唯一索引兜底:并发重复 request_id,拒绝创建(此前已预查重,这里只兜并发窗口)
+        db.rollback()
+        raise APIError(409, "请勿重复提交")
     db.refresh(task)
     return model, session, task, frozen
 
@@ -84,7 +90,11 @@ def _submit_image_task(db: Session, body: ImageTaskCreate, user: User) -> AiTask
         frozen_cost=frozen,
     )
     db.add(task)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise APIError(409, "请勿重复提交")
     db.refresh(task)
     return task
 
@@ -103,13 +113,15 @@ def _retry_task(db: Session, task_id: int, user: User) -> AiTask:
     model = db.get(Model, task.model_id)
     if model is None or model.status != "enabled":
         raise APIError(409, "模型维护中,暂不可调用")
-    # 重新冻结:按任务参数里的预估张数(缺省按 2 张保守估算)
-    est_qty = 2
-    if task.params_json:
-        try:
-            est_qty = min(max(int(json.loads(task.params_json).get("num") or 2), 1), 4)
-        except ValueError:
-            pass
+    # 重新冻结:图像按参数张数(缺省 2 张保守估算);音视频/其他按 1 次,与提交口径一致
+    est_qty = 1
+    if task.task_type == "image":
+        est_qty = 2
+        if task.params_json:
+            try:
+                est_qty = min(max(int(json.loads(task.params_json).get("num") or 2), 1), 4)
+            except ValueError:
+                pass
     frozen = pricing.per_call_sell_micro(model, est_qty)
     billing.freeze(db, user.id, frozen)  # 重新冻结
     task.status = "pending"

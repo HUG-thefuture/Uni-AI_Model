@@ -1,6 +1,6 @@
 """计价与按 token 结算内核的单元测试(pricing.freeze_amount / billing.settle_usage)。
 
-金额口径(2026-09-07 起):账本单位微元,1 元 = 10_000 微元;
+金额口径(2026-09-07 起):账本单位微元,1 元 = 1_000_000 微元(0.000001 元);
 token 费用按真实 usage 以微元精确扣减,无累积器。
 """
 import os
@@ -142,6 +142,36 @@ class BillingPricingTest(unittest.TestCase):
             db.commit()
             db.refresh(wallet)
             self.assertEqual(settled2, 0)  # 无可扣余额,按 0 计(不产生负余额)
+
+    def test_startup_recovery_refunds_interrupted_tasks(self) -> None:
+        """进程重启后,滞留的 pending/processing 冻结任务被统一退款并标记失败。"""
+        from app.models.ai_task import AiTask
+        from app.main import _recover_interrupted_tasks
+
+        uid = self.user_ids[0]
+        with SessionLocal() as db:
+            wallet = db.query(Wallet).filter(Wallet.user_id == uid).one()
+            wallet.balance = 100 * YUAN
+            # 按真实口径冻结(freeze 立即扣减),再模拟重启后任务滞留 processing
+            billing.freeze(db, uid, 500_000)
+            task = AiTask(request_id="recover-test-1", user_id=uid, model_id=1,
+                          task_type="image", prompt="重启前中断", status="processing",
+                          cost_status="frozen", cost=500_000, frozen_cost=500_000)
+            db.add(task)
+            db.commit()
+            task_id = task.id
+
+        _recover_interrupted_tasks()
+
+        with SessionLocal() as db:
+            task = db.get(AiTask, task_id)
+            self.assertEqual(task.status, "failed")
+            self.assertEqual(task.cost_status, "refunded")
+            self.assertEqual(task.cost, 0)
+            wallet = db.query(Wallet).filter(Wallet.user_id == uid).one()
+            self.assertEqual(wallet.balance, 100 * YUAN)  # 冻结 50 万元位退回
+            db.delete(task)
+            db.commit()
 
     def test_freeze_insufficient_balance_message(self) -> None:
         """余额不足 409,文案为「余额不足,请先充值」。"""

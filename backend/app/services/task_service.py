@@ -191,6 +191,9 @@ async def run_async_task(task_id: int) -> None:
             urls = list(result.get("image_urls") or [])
             if not urls and result.get("image_url"):
                 urls = [result["image_url"]]
+            if not urls:
+                # 零交付不得按成功扣费(否则 _actual_quantity 兜底 1 张会向空产出收 1 张的钱)
+                raise ProviderError("provider_bad_response", "图像服务未返回图片,本次不扣费")
             task.result_url = json.dumps(urls, ensure_ascii=False)
             # 用量统计:输入为提示词估算 token,输出是媒体文件不计 token
             token_usage = _record_task_usage(task, pricing.estimate_tokens(task.prompt), 0)
@@ -310,7 +313,7 @@ def task_to_item(task: AiTask) -> dict:
         "result_text": task.result_text,
         "result_url": task.result_url,
         "error_message": task.error_message,
-        "cost": task.cost,
+        "cost": pricing.to_yuan(task.cost),  # 账本微元 → 元(全站统一口径)
         "prompt_tokens": task.prompt_tokens,
         "completion_tokens": task.completion_tokens,
         "latency_ms": task.latency_ms,

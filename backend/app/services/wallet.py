@@ -109,6 +109,11 @@ async def get_order(db: AsyncSession, user_id: int, order_no: str) -> RechargeOr
         raise APIError(404, "订单不存在")
     return order
 
+async def find_order(db: AsyncSession, order_no: str) -> RechargeOrder | None:
+    """仅按订单号查单(不做归属校验):供支付宝公开回调核对订单存在性与金额。"""
+    return await db.scalar(select(RechargeOrder).where(RechargeOrder.order_no == order_no))
+
+
 async def get_user_records(db:AsyncSession,user_id:int,page:int=1,page_size:int=10)->dict:
     offset=(page-1)*page_size
     stmt=select(RechargeOrder).where(RechargeOrder.user_id == user_id).order_by(RechargeOrder.created_at.desc())

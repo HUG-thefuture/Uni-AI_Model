@@ -8,6 +8,14 @@
  * 本文件先于 js/api.js 加载，api.js / app.js / auth.js 都会读取 window.PortalConfig。
  */
 window.PortalConfig = {
-  apiBase: 'http://127.0.0.1:8000',
+  /* 本地访问走 127.0.0.1；局域网/外界通过 IP 访问时自动跟随页面主机名，
+   * 避免把 API 请求打到访问者自己的 127.0.0.1（后端须以 0.0.0.0 监听）。
+   * 注：跨主机访问还需后端 CORS_ORIGINS 放行前端来源(如 http://192.168.1.101:4174)。 */
+  apiBase: (function () {
+    var h = window.location.hostname;
+    return (h === 'localhost' || h === '127.0.0.1')
+      ? 'http://127.0.0.1:8000'
+      : 'http://' + h + ':8000';
+  })(),
   demoMode: false
 };

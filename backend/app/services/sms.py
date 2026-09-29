@@ -168,7 +168,8 @@ async def send_code(db: AsyncSession, phone: str, purpose: str, ip: str | None) 
 async def verify_code(db: AsyncSession, phone: str, purpose: str, code: str) -> None:
     """校验并消费验证码:取该 phone+purpose 最新一条未使用记录,失败直接抛 APIError。"""
     settings = get_settings()
-    record = await db.scalar(
+    # with_for_update:并发同一验证码多次提交时串行化,防止双消费(一次校验发放多个会话)
+    record = (await db.execute(
         select(SmsCode)
         .where(
             SmsCode.phone == phone,
@@ -177,7 +178,8 @@ async def verify_code(db: AsyncSession, phone: str, purpose: str, code: str) -> 
         )
         .order_by(SmsCode.id.desc())
         .limit(1)
-    )
+        .with_for_update()
+    )).scalars().first()
     if record is None:
         raise APIError(401, "验证码无效或已过期")
     if record.expires_at <= datetime.now():
